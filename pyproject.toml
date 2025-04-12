@@ -1,0 +1,16 @@
+[project]
+name = "hsdfmpm"
+version = "0.0.0"
+description = "Simplifying image processing through robust image classes tooled specifically for what you need."
+authors = [
+    {name = "jiversivers",email = "iversjesse@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
