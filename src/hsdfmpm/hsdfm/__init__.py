@@ -1,0 +1,1 @@
+from .hsdfm import HyperspectralImage
