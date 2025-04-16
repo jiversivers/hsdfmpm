@@ -1,12 +1,11 @@
-import glob
-import os
 import struct
-from pathlib import Path
 from typing import Optional, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
-
-from ..mpm.mpm import LifetimeImage, InstrumentResponseFunction
+from matplotlib.patches import Circle
+from numpy.polynomial.polynomial import polyfit
+from pydantic import BaseModel, model_validator, field_validator
 
 
 def read_chars(f, count):
@@ -230,10 +229,10 @@ def open_sdt_file_full_with_metadata(filename):
 
         # Decay data
         decay_data = np.fromfile(f, dtype=np.uint16)
+        decay_data = decay_data.astype(np.float32)
         ny, nx, adc = mi['image_y'], mi['image_x'], mi['adc_re']
-        decay = decay_data[:nx * ny * adc].reshape((adc, nx, ny)).transpose(2, 1, 0)
-        out['decay'] = {'Channel_1': decay}
-
+        decay = decay_data.reshape(-1, ny, nx, adc)
+        out['decay'] = decay
     return out
 
 def open_sdt_file_with_json_metadata(filename):
@@ -247,90 +246,203 @@ def open_sdt_file_with_json_metadata(filename):
     })
     return out["decay"], json_metadata
 
-def get_irf(irf: Optional[Union['InstrumentResponseFunction', str]] = None) -> 'InstrumentResponseFunction':
-    """
-    This is a helper function to parse the input IRF as either a file, a preloaded LifetimeImage, or None. In the case
-    of None, the default path is from in .hsdfm package path. This is searched and the most recent IRF filepath is used.
-    In this case and the case of an input filepath, the .sdt file is loaded into a LifetimeImage object and returned. In
-    the case of an input LifetimeImage object, it is simply returned.
+def polar_from_cartesian(x, y):
+    z = x + 1j * y
+    return np.angle(z), np.abs(z)
 
-    :param irf: The path to the IRF file, or a preloaded IRF in a LifetimeImage object. Optional.
-    :type irf: Union['LifetimeImage', str]
+def cartesian_from_polar(theta, r):
+    z = r * np.exp(1j * theta)
+    return z.real, z.imag
 
-    :raises FileNotFoundError: If no file is selected when required.
-    :raises ValueError: If the IRF file format is unsupported or corrupt.
+def lifetime_from_cartesian(x, y, omega):
+    return (1 / omega) * np.tan(np.arctan2(y, x))
 
-    :return: A LifetimeImage object for the IRF file.
-    :rtype: LifetimeImage
+def cartesian_from_lifetime(tau, omega):
+    phi, m = polar_from_lifetime(tau, omega)
+    return cartesian_from_polar(phi, m)
 
-    """
-    if isinstance(irf, 'InstrumentResponseFunction'):
-        return irf
+def polar_from_lifetime(tau, omega):
+    phi = np.arctan(omega * tau)
+    m = 1 / np.sqrt(1 + (omega * tau) ** 2)
+    return phi, m
 
-    irf_file = None
-    if irf is None:
-        # Check for saved IRF
-        irf_path = Path.home() / ".hsdfmpm"
-        irf_file = glob.glob(os.path.join(irf_path, "*.irf"))[0]
-        irf_file = glob.glob(os.path.join(irf_path, f'*.sdt'))[0]
-        # Check for the IRF file
-        if not irf_file:
-            raise FileNotFoundError(f"No IRF file found in {irf_path}")
-    elif isinstance(irf, str):
-        irf_file = Path(irf)
-    if not os.path.isfile(irf_file):
-        raise FileNotFoundError(f"No IRF file found at {irf_file}")
 
-    if irf_file is not None:
-        # Load input IRF
-        irf = InstrumentResponseFunction.load(image_path=irf)
+def plot_universal_circle(omega: float,
+                          tau_labels: Optional[list[float]] = None,
+                          ax: Optional[plt.Axes] = None
+                          ) -> tuple[plt.Axes, np.ndarray[float]]:
+    # Get ax
+    ax = ax if ax is not None else plt.gca()
 
-    return irf
+    # Add Circle
+    circle = Circle((0.5, 0), radius=0.5, facecolor='none', edgecolor='black', label='Universal Circle')
+    ax.add_patch(circle)
 
-def calibrate_irf(irf: LifetimeImage, save: bool = True, **kwargs):
-    """
-    Calibrates phasor parameters using an input IRF (Instrument Response Function).
+    # Add labels
+    if tau_labels is not None:
+        xy_coords = np.zeros((len(tau_labels), 2), dtype=np.float64)
+        for i, label in enumerate(tau_labels):
+            x, y = cartesian_from_lifetime(label, omega)
+            ax.scatter(x, y, s=5, color='black', label='_nolegend_')
+            xy_coords[i] = [x, y]
+    else:
+        xy_coords = np.array([], dtype=np.float64)
+    return ax, xy_coords
 
-    This function computes phasor calibration parameters from an IRF file, which may be
-    a `.tiff` stack, a raw `.sdt` file, or a path to one of these file types. If no input
-    is provided, a GUI file selector will prompt the user to choose a file.
+# TODO: Incorporate into LifetimeImage
+# TODO: Add density plot, universal circle, etc.
+class PhasorPlot(BaseModel):
+    g: np.ndarray
+    s: np.ndarray
+    line: Union[tuple[float, float], list[float, float], np.ndarray[float, float]] = None
+    labelled_taus: Optional[dict[str, float]] = None
+    frequency: float = 80e6
+    harmonic: int = 1
+    fig: Optional[plt.Figure] = None
+    ax: Optional[plt.Axes] = None
 
-    The resulting calibration is stored in a `params` structure within the returned
-    `LifetimeImage` object. This structure includes laser and timing information, as well
-    as calculated phasor calibration values (modulation and phase), both as pixel-wise
-    maps and global means.
+    class Config:
+        arbitrary_types_allowed = True
+        extra = 'allow'
 
-    :param irf: Instrument Response Function image or file path to be used for calibration.
-                If left empty, a GUI will prompt for file selection.
-    :type irf: LifetimeImage
+    @model_validator(mode='after')
+    def start_plot(self):
+        # Setup figure and axes
+        f, a = plt.subplots()
+        if self.ax is None:
+            self.ax = a
+        if self.fig is None:
+            self.fig = f
+        self.draw()
+        return self
 
-    :return: A LifetimeImage object with an updated `params` field containing the calibration data.
-    :rtype: LifetimeImage
+    def draw(self):
+        # Scatter data
+        self.ax.clear()
+        self.scatter = self.ax.scatter(self.g.flatten(), self.s.flatten(), s=0.5, color='black', label='Phasor Cloud')
 
-    Calibration fields included in `params`:
+        # Line data
+        if self.line:
+            m, b = self.line
+            x_vals = np.linspace(0, 1, 100)
+            y_vals = m * x_vals + b
+            self.line_plot, = self.ax.plot(x_vals, y_vals, color='red', label='Fit line')
 
-    - ``f`` (float): Laser frequency in MHz.
-    - ``dt`` (float): Temporal bin width in nanoseconds.
-    - ``n`` (int): Harmonic number.
-    - ``calibration`` (dict): Nested dictionary with the following keys:
-        - ``tau_ref`` (float): Reference lifetime in ns.
-        - ``m_ref`` (float, optional): Reference modulation.
-        - ``phi_ref`` (float, optional): Reference phase.
-        - ``w`` (float): Angular laser frequency in rad/s.
-        - ``T`` (int): Number of time bins.
-        - ``Map`` (dict): Pixel-wise calibration values.
-        - ``Mean`` (dict): Mean calibration values.
+        # Lifetime labels
+        if self.labelled_taus:
+            xs, ys = [], []
+            for label, tau in self.labels.items():
+                x, y = cartesian_from_lifetime(tau, 2 * np.pi * self.frequency * self.harmonic)
+                xs.append(x)
+                ys.append(y)
+                self.label_plot.append(self.ax.annotate(label, x, y), xytext=(1.05 * x, 1.05 * y))
+            self.tau_plot = self.ax.scatter(xs, ys, color='blue', marker='x', label='_nolegend_')
 
-    Saving behavior is controlled by a SAVEOPT argument or a UI popup:
+        # Ax settings
+        self.ax.set_xlim(0, 1)
+        self.ax.set_ylim(0, 0.7)
+        self.ax.set_xlabel('G')
+        self.ax.set_ylabel('S')
+        self.ax.set_aspect('equal')
+        self.ax.legend()
 
-    - Save: 'on', 'save', True, 1
-    - Ask: 'ask', ''
-    - Do not save: 'off', 'nosave', False, 0
+    def toggle(self, **kwargs):
+        for attr, option in kwargs.items():
+            to_set = getattr(self, attr)
+            to_set.set_visible(option)
+        self.fig.canvas.draw_idle()
 
-    Additional keyword arguments are passed to ``getPhasorCoords``. Refer to
-    ``getPhasorCoords`` and ``SDTtoTimeStack`` for supported options.
-    :param irf:
-    :return:
-    """
+    def update_data(self, **kwargs):
+        for attr, value in kwargs.items():
+            if getattr(self, attr) is not None:
+                setattr(self, attr, value)
+        self.fig.canvas.draw_idle()
 
-    period = irf.metadata['']
+    def show(self):
+        plt.show()
+
+def get_phasor_coordinates(decay,
+                           bin_width: float = 10 / 256 / 1e9,
+                           frequency: float = 80e6,
+                           harmonic: int = 1,
+                           threshold: float = 0,
+                           ) -> np.ndarray:
+    """Helper function to get the raw phasor coordinates from a decay curve given the imaging parameters provided."""
+    T = decay.shape[-1]
+    dt = bin_width
+    w = 2 * np.pi * harmonic * frequency
+
+    # Create an array of t (bin numbers) for each time frame of the decay
+    t = np.expand_dims(np.arange(0.5, T, 1) * dt, axis=0)
+    while t.ndim < decay.ndim:
+        t = np.expand_dims(t, axis=0)
+
+    # Calculate raw phasor coordinates
+    g = np.sum(decay * np.cos(w * t), axis=-1)
+    s = np.sum(decay * np.sin(w * t), axis=-1)
+    photons = np.sum(decay, axis=-1)
+
+    # Normalize to counts and zero pixels below threshold count
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g = np.where(photons > threshold, g / photons, 0)
+        s = np.where(photons > threshold, s / photons, 0)
+
+    return g, s, photons
+
+
+def fit_phasor(g: np.ndarray[float], s: np.ndarray[float]) -> tuple[float, float]:
+    fit = polyfit(g.flatten(), s.flatten(), 1)
+    b = fit[0]
+    m = fit[1]
+    return b, m
+
+def find_intersection_with_circle(b: float, m:float) -> tuple[np.ndarray[float, float], np.ndarray[float, float]]:
+    # Calculate intersection points of the line (quadratic eqn)
+    x = ((-(2 * m * b - 1) + np.array([1, -1]) * np.sqrt((2 * m * b - 1) ** 2 - 4 * (m ** 2 + 1) * b ** 2))
+         / (2 * (m ** 2 + 1)))
+    y = m * x + b
+    return x, y
+
+def project_to_line(g: np.ndarray[float], s: np.ndarray[float],
+                    x: np.ndarray[float], y: np.ndarray[float]) -> tuple[np.ndarray[float], np.ndarray[float]]:
+    # Create line segment
+    v = np.array([np.diff(x), np.diff(y)])
+    v_norm_sq = np.einsum('ij,ij', v, v)
+
+    # Vectorize all coordinates
+    p = np.stack([g.flatten(), s.flatten()], axis=1)
+
+    # Distance from line start
+    a = np.array([x[0], y[0]])
+    d = p - a
+
+    # Scalar projection
+    t = d @ v / v_norm_sq
+
+    # Reprojected coordinates
+    p = a + np.outer(t, v)
+    gp = p[:, 0].reshape(g.shape)
+    sp = p[:, 1].reshape(s.shape)
+    return gp, sp
+
+def get_endpoints_from_projection(gp: np.ndarray[float], sp: np.ndarray[float],
+                                  x: np.ndarray[float], y: np.ndarray[float],
+                                  tau: np.ndarray[float]) -> tuple[np.ndarray[float], np.ndarray[float]]:
+    # Get fraction and lifetime of projected points
+    # Repeat arrays to calculate for two species
+    gp = np.concatenate([gp, gp], axis=0)
+    sp = np.concatenate([sp, sp], axis=0)
+    x = np.expand_dims(x, axis=(1, 2))
+    y = np.expand_dims(y, axis=(1, 2))
+
+    # Distance formula from intersections (flip b/c distance from 2 -> alpha 1)
+    alphas = np.sqrt((gp - np.flip(x, axis=0)) ** 2 + (sp - np.flip(y, axis=0)) ** 2)
+    total = np.sum(alphas, axis=0)
+    alphas /= total  # Ensure normalization
+
+    # Weighted average for lifetimes
+    while tau.ndim < alphas.ndim:
+        tau = np.expand_dims(tau, axis=-1)
+    tau_m = np.sum(tau * alphas, axis=0)
+
+    return alphas, tau_m
