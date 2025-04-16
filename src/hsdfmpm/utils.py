@@ -1,22 +1,42 @@
-import glob
 import json
 import operator
-import os
 import pickle
 import warnings
 from collections.abc import Iterable
-from functools import cached_property
 from pathlib import Path
-from typing import Optional, Any, Union
+from typing import Optional, Any, Union, Annotated, overload
 from urllib.parse import urlparse
 
 import cv2
 import numpy as np
-from pydantic import BaseModel, model_validator, field_validator, Field
+from pydantic import BaseModel, model_validator, field_validator, Field, computed_field, AfterValidator
 from tqdm.contrib import itertools
 
 DATA_PATH = Path.home() / ".hsdfmpm"
 DATA_PATH.mkdir(exist_ok=True, parents=True)
+
+def is_file(file_path: str) -> Path:
+    file_path = ensure_path(file_path)
+    if not file_path.is_file():
+        raise FileNotFoundError(file_path)
+    return file_path
+
+def is_dir(file_path: str) -> Path:
+    file_path = ensure_path(file_path)
+    if not file_path.is_dir():
+        raise NotADirectoryError(file_path)
+    return file_path
+
+@overload
+def channel_check(channels: tuple[int]) -> tuple[int]: ...
+@overload
+def channel_check(channels: Union[int, list[int]]) -> list[int]: ...
+
+def channel_check(channels: Union[int, list[int], tuple[int]]) -> Union[tuple[int], list[int]]:
+    channels = [channels] if isinstance(channels, int) else channels
+    if np.any([ch > 3 for ch in channels]):
+        raise IndexError('Channel index out of range.')
+    return channels
 
 def forward_arithmetics(attr):
     ops = {
@@ -64,45 +84,36 @@ class ImageData(BaseModel):
 
     :param image_path: str; The directory path of the HSDFM image cube and JSON metadata file.
     """
-    image_path: str
+    image_path: Annotated[Union[str, Path], AfterValidator(is_dir)]
     metadata_ext: str
-    metadata_path: Optional[str] = None
+    metadata_path: Annotated[Optional[Union[str, Path]], AfterValidator(is_file)] = None
     image_ext: str = '.tiff'
-    _hyperstack: None
+    channels: Annotated[Union[int, list[int], tuple[int]], AfterValidator(channel_check)] = (0, 1, 2, 3)
+    _hyperstack: Optional[np.ndarray] = None
 
     class Config:
         extra = 'allow'
+        arbitrary_types_allowed = True
 
-    @field_validator('image_path')
-    @classmethod
-    def validate_image_path(cls, v):
-        if not os.path.exists(v) or not os.path.isdir(v):
-            raise FileNotFoundError(f'"{v}" is not a valid directory.')
-        return v
-
-    @model_validator(mode='after')
-    def set_metadata_path(self) -> 'ImageData':
-        if self.metadata_path is None:
-            matches = glob.glob(f'{self.image_path}{os.path.sep}*{self.metadata_ext}')
-            if not matches:
-                raise ValueError(f"No file found in '{self.image_path}' with extension '{self.metadata_ext}'.")
-            self.metadata_path = matches[0]
-
-        if not os.path.isfile(self.metadata_path):
-            raise ValueError(f'"{self.metadata_path}" is not a valid file.')
-
-        return self
-
-    @cached_property
+    @computed_field
+    @property
     def hyperstack(self) -> np.ndarray:
-        self._hyperstack = read_hyperstack(self.image_path, self.image_ext)
-        return self._hyperstack
+        if self._hyperstack is None:
+            self._hyperstack = read_hyperstack(self.image_path, self.image_ext)
+        # Select out channels
+        hyperstack = np.stack([self._hyperstack[ch] for ch in self.channels], axis=0)
+        return hyperstack
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: int) -> np.ndarray:
+        if item > len(self):
+            raise IndexError(f'Index {item} out of range for ImageData with length {len(self)}')
         return self.hyperstack[item]
 
-    def __len__(self):
-        return self.hyperstack.shape[0]
+    def __len__(self) -> int:
+        if self.hyperstack.ndim < 3:
+            return 1
+        else:
+            return self.hyperstack.shape[-1]
 
     def bin(self, bin_factor: int = 4):
         bands, h, w = self.hyperstack.shape
@@ -147,10 +158,12 @@ def prepare_src(src: np.ndarray, include_location: bool = False):
 
 def read_hyperstack(img_dir: str, ext: str = '.tif') -> np.ndarray:
     hs = []
-    print(os.path.join(img_dir, '*', ext))
-    for img_path in glob.glob(os.path.join(img_dir, f'*{ext}')):
+    for img_path in Path(img_dir).glob(f'*{ext}'):
         hs.append(cv2.imread(img_path, cv2.IMREAD_UNCHANGED))
-    return np.stack(hs, dtype=np.float64)
+    hs = np.stack(hs, dtype=np.float64)
+    while hs.ndim < 3:
+        hs = np.expand_dims(hs, axis=0)
+    return hs
 
 def ensure_path(path_like: Union[str, Path]) -> Path:
     if isinstance(path_like, Path):
@@ -195,10 +208,11 @@ class SerializableModel(BaseModel):
     def _report_version(cls, version):
         if version != cls.__version__:
             warnings.warn(
-                f"Loaded version {cls.__version__} of {cls.__class__.__name__}",
+                f"Loaded version {version} of {cls.__class__.__name__}",
                 stacklevel=2
             )
 
+#TODO: Fix this so it actually updates the saved irf model
 def autoversion(major=1, minor=0):
     """
     Decorator to auto-increment the patch version of a model on each load.
