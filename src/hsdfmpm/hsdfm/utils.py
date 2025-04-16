@@ -1,4 +1,5 @@
 import json
+
 import numpy as np
 
 from numpy.lib._stride_tricks_impl import as_strided
