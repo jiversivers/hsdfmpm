@@ -1,1 +1,1 @@
-from .hsdfm import HyperspectralImage
+from .hsdfm import HyperspectralImage, MergedHyperspectralImage
