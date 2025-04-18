@@ -1,4 +1,6 @@
 import json
+import os
+from pathlib import Path
 
 import numpy as np
 
@@ -7,9 +9,9 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 from enum import Enum
-from typing import Callable
+from typing import Callable, Union
 
-from ..utils import prepare_src
+from ..utils import prepare_src, ensure_path
 
 
 def handle_full_mc():
@@ -82,7 +84,6 @@ def read_metadata_json(file_path):
         print(f"An error occurred: {e}")
 
     return grouped_metadata
-
 
 def normalize_integration_time(hyperstack, integration_time):
     hyperstack /= np.array(integration_time)[:, np.newaxis, np.newaxis]
@@ -161,3 +162,13 @@ def slice_clusters(src, clusters, slice_to_take=None):
     # Select src where it is in the selected clusters
     in_cluster_mask = np.any([clusters == sel for sel in selected], axis=0)
     return in_cluster_mask
+
+def find_cycles(root: Union[str, Path], search_term='metadata.json') -> list[Path]:
+    found_paths = []
+    root = ensure_path(root)
+    for path, _, files in root.walk():
+        for f in files:
+            if search_term in f:
+                found_paths.append(Path(path))
+                break
+    return found_paths
