@@ -4,6 +4,7 @@ import pickle
 import warnings
 from collections.abc import Iterable
 from pathlib import Path
+from types import NoneType
 from typing import Optional, Any, Union, Annotated, overload
 from urllib.parse import urlparse
 
@@ -34,8 +35,6 @@ def channel_check(channels: Union[int, list[int]]) -> list[int]: ...
 
 def channel_check(channels: Union[int, list[int], tuple[int]]) -> Union[tuple[int], list[int]]:
     channels = [channels] if isinstance(channels, int) else channels
-    if np.any([ch > 3 for ch in channels]):
-        raise IndexError('Channel index out of range.')
     return channels
 
 def forward_arithmetics(attr):
@@ -85,9 +84,9 @@ class ImageData(BaseModel):
     :param image_path: str; The directory path of the HSDFM image cube and JSON metadata file.
     """
     image_path: Annotated[Union[str, Path], AfterValidator(is_dir)]
+    image_ext: str = '.tiff'
     metadata_ext: str
     metadata_path: Annotated[Optional[Union[str, Path]], AfterValidator(is_file)] = None
-    image_ext: str = '.tiff'
     channels: Annotated[Union[int, list[int], tuple[int]], AfterValidator(channel_check)] = (0, 1, 2, 3)
     _hyperstack: Optional[np.ndarray] = None
 
@@ -172,6 +171,9 @@ def ensure_path(path_like: Union[str, Path]) -> Path:
         if path_like.startswith("file://"):
             return Path(urlparse(path_like).path)
         return Path(path_like)
+    if isinstance(path_like, NoneType):
+        warnings.warn("'ensure_path' got NoneType, but expected str or Path object.", UserWarning, stacklevel=2)
+        return None
     raise TypeError(f"Cannot convert {type(path_like)} to Path")
 
 class SerializableModel(BaseModel):
