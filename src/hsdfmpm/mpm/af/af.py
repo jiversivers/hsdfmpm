@@ -96,8 +96,10 @@ class OpticalRedoxRatio(BaseModel):
             self.ex755 = AutofluorescenceImage(image_path=self.ex755, power_file_path=self.power_file_path)
         if isinstance(self.ex855, (str, Path)):
             self.ex855 = AutofluorescenceImage(image_path=self.ex855, power_file_path=self.power_file_path)
-        self.fad = self.ex855[1] if len(self.ex855) == 4 else self.ex855[0]
-        self.nadh = self.ex755[2] if len(self.ex755) == 4 else self.ex755[0]
+        self.ex855.normalize_to_fluorescein()
+        self.ex755.normalize_to_fluorescein()
+        self.fad = self.ex855.normalized[1] if len(self.ex855) == 4 else self.ex855[0]
+        self.nadh = self.ex755.normalized[2] if len(self.ex755) == 4 else self.ex755[0]
         return self
 
     @computed_field
