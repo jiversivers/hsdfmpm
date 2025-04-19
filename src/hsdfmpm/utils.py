@@ -10,11 +10,44 @@ from urllib.parse import urlparse
 
 import cv2
 import numpy as np
+from poetry.console.commands import self
 from pydantic import BaseModel, model_validator, field_validator, Field, computed_field, AfterValidator
 from tqdm.contrib import itertools
 
 DATA_PATH = Path.home() / ".hsdfmpm"
 DATA_PATH.mkdir(exist_ok=True, parents=True)
+
+# Define the class decorator
+def add_arithmetic_methods(cls):
+    # Mapping of dunder methods to their respective operator functions
+    methods = {
+        '__add__': operator.add,
+        '__sub__': operator.sub,
+        '__mul__': operator.mul,
+        '__truediv__': operator.truediv,
+        '__floordiv__': operator.floordiv,
+        '__mod__': operator.mod,
+        '__pow__': operator.pow,
+        '__lt__': operator.lt,
+        '__le__': operator.le,
+        '__gt__': operator.gt,
+        '__ge__': operator.ge,
+        '__eq__': operator.eq,
+    }
+
+    # Dynamically add methods to the class
+    for name, func in methods.items():
+        # Define the function dynamically
+        def method(self, other, op=func):
+            # Ensure `other` is the compatible type or extract its value
+            if isinstance(other, self.__class__):
+                other = other._active
+            return op(self._active, other)
+
+        # Attach the dynamically created method to the class
+        setattr(cls, name, method)
+
+    return cls
 
 def is_file(file_path: str) -> Path:
     file_path = ensure_path(file_path)
@@ -29,6 +62,8 @@ def is_dir(file_path: str) -> Path:
     return file_path
 
 @overload
+def channel_check(channels: NoneType) -> NoneType: ...
+@overload
 def channel_check(channels: tuple[int]) -> tuple[int]: ...
 @overload
 def channel_check(channels: Union[int, list[int]]) -> list[int]: ...
@@ -37,58 +72,22 @@ def channel_check(channels: Union[int, list[int], tuple[int]]) -> Union[tuple[in
     channels = [channels] if isinstance(channels, int) else channels
     return channels
 
-def forward_arithmetics(attr):
-    ops = {
-        '__add__': operator.add,
-        '__sub__': operator.sub,
-        '__mul__': operator.mul,
-        '__truediv__': operator.truediv,
-        '__floordiv__': operator.floordiv,
-        '__mod__': operator.mod,
-        '__pow__': operator.pow,
-        '__neg__': operator.neg,
-        '__pos__': operator.pos,
-        '__abs__': operator.abs,
-        '__radd__': operator.add,
-        '__rsub__': operator.sub,
-        '__rmul__': operator.mul,
-        '__rtruediv__': operator.truediv,
-        '__rfloordiv__': operator.floordiv,
-        '__rmod__': operator.mod,
-        '__rpow__': operator.pow,
-    }
-
-    def wrapper(cls):
-        for name, op in ops.items():
-            def make_method(op, name):
-                if name.startswith('__r'):  # right-hand operations
-                    def method(self, other):
-                        return cls(op(other, getattr(self, attr)))
-                elif name.startswith('__') and name.endswith('__'):  # unary or left-hand
-                    def method(self, other=None):
-                        result = op(getattr(self, attr), other) if other is not None else op(getattr(self, attr))
-                        return cls(result) if not isinstance(result, cls) else result
-                return method
-
-            setattr(cls, name, make_method(op, name))
-        return cls
-
-    return wrapper
-
-@forward_arithmetics('normalized')
+@add_arithmetic_methods
 class ImageData(BaseModel):
     """
     This class holds several useful methods for loading and (pre-)processing HSDFM image cubes. To maintain
     computational efficiency, methods that return a new array are cached.
 
-    :param image_path: str; The directory path of the HSDFM image cube and JSON metadata file.
+    :param image_path: str; The directory path of the image cube and metadata file.
     """
     image_path: Annotated[Union[str, Path], AfterValidator(is_dir)]
     image_ext: str = '.tiff'
     metadata_ext: str
     metadata_path: Annotated[Optional[Union[str, Path]], AfterValidator(is_file)] = None
-    channels: Annotated[Union[int, list[int], tuple[int]], AfterValidator(channel_check)] = (0, 1, 2, 3)
+    metadata: Optional[dict] = None
+    channels: Annotated[Optional[Union[int, list[int], tuple[int]]], AfterValidator(channel_check)] = None
     _hyperstack: Optional[np.ndarray] = None
+    _active: Optional[np.ndarray] = None
 
     class Config:
         extra = 'allow'
@@ -100,27 +99,46 @@ class ImageData(BaseModel):
         if self._hyperstack is None:
             self._hyperstack = read_hyperstack(self.image_path, self.image_ext)
         # Select out channels
-        hyperstack = np.stack([self._hyperstack[ch] for ch in self.channels], axis=0)
+        hyperstack = self._hyperstack.copy()  # So channels can be selected after initialization
+        if self.channels is not None:
+            hyperstack = np.stack([self._hyperstack[ch] for ch in self.channels], axis=0)
+
         return hyperstack
+
+    @computed_field
+    @property
+    def image(self) -> np.ndarray:
+        return self._active
+
+    @computed_field
+    @property
+    def raw(self) -> np.ndarray:
+        return self.hyperstack
+
+    def reset(self):
+        self._active = self._hyperstack
 
     def __getitem__(self, item: int) -> np.ndarray:
         if item > len(self):
             raise IndexError(f'Index {item} out of range for ImageData with length {len(self)}')
-        return self.hyperstack[item]
+        return self._active[item]
 
     def __len__(self) -> int:
-        if self.hyperstack.ndim < 3:
+        if self._active.ndim < 3:
             return 1
         else:
-            return self.hyperstack.shape[-1]
+            return self._active.shape[-1]
+
+    def __array__(self):
+        return self._active
 
     def bin(self, bin_factor: int = 4):
-        bands, h, w = self.hyperstack.shape
+        bands, h, w = self._active.shape
         h_binned = h // bin_factor
         w_binned = w // bin_factor
 
         # Crop to make divisible
-        cube_cropped = self.hyperstack[:, :h_binned * bin_factor, :w_binned * bin_factor]
+        cube_cropped = self._active[:, :h_binned * bin_factor, :w_binned * bin_factor]
 
         # Reshape and bin
         cube_reshaped = cube_cropped.reshape(
@@ -130,10 +148,10 @@ class ImageData(BaseModel):
         )
 
         # Average over binning axes
-        self._hyperstack = cube_reshaped.mean(axis=(2, 4))
+        self._active = cube_reshaped.mean(axis=(2, 4))
 
     def apply_kernel_bank(self, kernel_bank):
-        self.filtered = np.nanmax([
+        self._active = np.nanmax([
             cv2.filter2D(self.hyperstack, -1, k) for (k,) in itertools.product(kernel_bank)
         ], axis=0)
 
