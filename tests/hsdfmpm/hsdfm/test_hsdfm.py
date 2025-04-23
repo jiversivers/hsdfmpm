@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
 from unittest.mock import patch, MagicMock
-from hsdfmpm.hsdfm import MergedHyperspectralImage
-from hsdfmpm.hsdfm.hsdfm import HyperspectralImage
+from hsdfmpm.hsdfm.hsdfm import HyperspectralImage, MergedHyperspectralImage
+
 
 class TestHyperspectralImage(unittest.TestCase):
     def setUp(self):
@@ -20,10 +20,12 @@ class TestHyperspectralImage(unittest.TestCase):
         self.addCleanup(glob_patch.stop)
 
         # Mocking normalization arrays
-        self.std_arr = np.array([[2, 1], [1, 2]])
-        self.bg_arr = np.array([[0.5, 1.5], [1.5, 0.5]])
+        self.std_arr = np.array([[[2, 1], [1, 2]],
+                                 [[3, 4], [4, 3]]])
+        self.bg_arr = np.array([[[0.5, 1.5], [1.5, 0.5]],
+                                [[0.0, 0.5], [0.5, 0.0]]])
 
-        # Patch for file-dependencies (metadata)
+        # Patch for file-dependencies (data/metadata)
         self.md_vals = {'ExpTime': [2, 4]}
         self.hs_vals = np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
         self.scalar = 2
@@ -31,20 +33,17 @@ class TestHyperspectralImage(unittest.TestCase):
         # Create mock standards (in context to skip validation)
         with patch('hsdfmpm.hsdfm.hsdfm.read_metadata_json', return_value=self.md_vals):
             with patch.object(HyperspectralImage, 'load_data', return_value=None):
-                self.mock_std = HyperspectralImage.model_construct(image_path='dummy/path', _active=self.std_arr)
-                self.mock_bg = HyperspectralImage.model_construct(image_path='dummy/path', _active=self.bg_arr)
+                with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.std_arr):
+                    self.mock_std = MergedHyperspectralImage(image_paths=['dummy/path2', 'dummy/path2'], scalar=1)
+
+                with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.bg_arr):
+                    self.mock_bg = HyperspectralImage(image_path='dummy/path')
 
                 with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.hs_vals):
                     self.hsi = HyperspectralImage(image_path="dummy_path")
                     self.hsi_with_scalar = HyperspectralImage(image_path="dummy_path", scalar=self.scalar)
                     self.hsi_with_array_scalar = HyperspectralImage(image_path="dummy_path", scalar=self.hs_vals/self.scalar)
-                    self.hsi_with_standard = HyperspectralImage.model_construct(
-                        image_path="dummy_path",
-                        standard=self.mock_std,
-                        background=self.mock_bg,
-                        _active=self.hs_vals,
-                        metadata=self.md_vals
-                    )
+                    self.hsi_with_standard = HyperspectralImage(image_path="dummy_path", standard=self.mock_std, background=self.mock_bg)
 
 
     def test_load_data(self):
@@ -78,7 +77,29 @@ class TestHyperspectralImage(unittest.TestCase):
         self.hsi_with_standard.normalize()
         self.hsi_with_standard.normalize_integration_time.assert_called_once()
         self.hsi_with_standard.normalize_to_standard.assert_called_once()
+        expected = (
+                ((self.hs_vals / np.array(self.md_vals['ExpTime'])[..., np.newaxis, np.newaxis]) - self.bg_arr)
+                / (self.std_arr - self.bg_arr)
+        )
+        self.assertTrue(np.all(self.hsi_with_standard == expected))
 
+    def test_persistence_when_nested(self):
+        # Straight up
+        self.assertTrue(np.all(self.hsi_with_standard.standard==self.mock_std))
+        self.assertTrue(np.all(self.hsi_with_standard.background==self.mock_bg))
+
+        # After normalization of nested object
+        self.mock_std.normalize()
+        self.assertTrue(np.all(self.hsi_with_standard.standard == self.mock_std))
+
+    def test_normalize_with_missing(self):
+        self.assertRaises(ValueError, self.hsi.normalize_to_standard)
+
+        self.hsi.normalize_integration_time = MagicMock(side_effect=self.hsi.normalize_integration_time)
+        self.hsi.normalize_to_standard = MagicMock(side_effect=self.hsi.normalize_to_standard)
+        self.hsi.normalize()
+        self.hsi.normalize_integration_time.assert_called_once()
+        self.hsi.normalize_to_standard.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()
