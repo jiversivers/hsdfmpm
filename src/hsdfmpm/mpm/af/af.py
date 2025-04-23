@@ -30,6 +30,7 @@ class AutofluorescenceImage(ImageData):
             self.metadata_path = matches[0]
 
         self.metadata_path = Path(self.metadata_path)
+        self._active = self.hyperstack
         return self
 
         # Load metadata into attributes
@@ -56,7 +57,7 @@ class AutofluorescenceImage(ImageData):
         # Predict the actual power to this reference line
         self.norm_pwr = m * self.attenuation + b
         transfer_function = get_transfer_function(self.date, self.laser)
-        self.normalized = transfer_function(
+        self._active = transfer_function(
             img=self.hyperstack, pwr=self.norm_pwr, gain=self.gain
         )
 
@@ -98,8 +99,6 @@ class OpticalRedoxRatio(BaseModel):
             self.ex855 = AutofluorescenceImage(image_path=self.ex855, power_file_path=self.power_file_path)
         self.ex855.normalize_to_fluorescein()
         self.ex755.normalize_to_fluorescein()
-        self.fad = self.ex855.normalized[1] if len(self.ex855) == 4 else self.ex855[0]
-        self.nadh = self.ex755.normalized[2] if len(self.ex755) == 4 else self.ex755[0]
         return self
 
     @computed_field

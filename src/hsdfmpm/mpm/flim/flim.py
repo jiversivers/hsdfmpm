@@ -3,10 +3,9 @@ from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
-from numpy.polynomial.polynomial import polyfit
 from matplotlib import pyplot as plt
 import seaborn as sns
-from pydantic import model_validator, computed_field, root_validator, field_validator, BaseModel
+from pydantic import model_validator, computed_field
 from scipy.ndimage import median_filter
 
 from hsdfmpm.mpm.flim.utils import open_sdt_file_with_json_metadata, cartesian_from_polar, polar_from_cartesian, \
@@ -125,8 +124,8 @@ class LifetimeImage(ImageData):
 
     def phasor_plot(self, circ: bool = True, ax: Optional[plt.Axes] = None, **kwargs) -> plt.Axes:
         g, s = self.phasor_coordinates(**kwargs)
-        for ch in self.channels:
-            x, y = g[ch].flatten(), s[ch].flatten()
+        for ch, (g_ch, s_ch) in enumerate(zip(g, s)):
+            x, y = g_ch.flatten(), s_ch.flatten()
             sns.scatterplot(x=x, y=y, s=1, color='.15', label=f'Phasor Coordinates, CH: {ch}')
             sns.histplot(x=x, y=y, bins=50, pthresh=.1, cmap="mako")
             sns.kdeplot(x=x, y=y, levels=5, color="w", linewidths=1)
