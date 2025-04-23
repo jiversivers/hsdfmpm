@@ -19,6 +19,7 @@ class HyperspectralImage(ImageData):
     image_ext: str = '.tiff'
     standard: Optional[SkipValidation[Union['MergedHyperspectralImage', 'HyperspectralImage']]] = None
     background: Optional[SkipValidation[Union['MergedHyperspectralImage', 'HyperspectralImage']]] = None
+    wavelengths: Optional[list[float]] = None
     scalar: Union[float, np.ndarray[float]] = 1
 
     @model_validator(mode='after')
@@ -30,9 +31,23 @@ class HyperspectralImage(ImageData):
 
         # Load hyperstack
         hyperstack = read_hyperstack(img_dir=self.image_path, ext=self.image_ext)
-        self._hyperstack = hyperstack if self.scalar is None else hyperstack / self.scalar
+        self._hyperstack = hyperstack
+        try:
+            self._hyperstack /= self.scalar
+            scale_after_masking = False
+        except ValueError:
+            scale_after_masking = True
+
+        # Apply wavelength selection to image and metadata
+        if self.wavelengths is not None:
+            mask = np.isin(self.metadata['Wavelength'], self.wavelengths)
+            self._hyperstack = self._hyperstack[mask]
+            for key in self.metadata.keys():
+                self.metadata[key] = [self.metadata[key][i] for i, is_in_mask in enumerate(mask) if is_in_mask]
+        self._hyperstack /= self.scalar if scale_after_masking else 1
         self._active = self.hyperstack
         return self
+
 
     def normalize_integration_time(self):
         self._active = normalize_integration_time(self, self.metadata['ExpTime'])
@@ -69,6 +84,7 @@ class MergedHyperspectralImage(BaseModel):
     metadata_path: Optional[Union[str, Path]] = None
     metadata_ext: str = 'metadata.json'
     listed_hyperstack: Optional[list[HyperspectralImage]] = None
+    wavelengths: Optional[list[float]] = None
     scalar: float = 1
 
     @model_validator(mode='after')
@@ -79,7 +95,8 @@ class MergedHyperspectralImage(BaseModel):
                           image_ext=self.image_ext,
                           metadata_ext=self.metadata_ext,
                           channels=self.channels,
-                          scalar=self.scalar)
+                          scalar=self.scalar,
+                          wavelengths=self.wavelengths)
             if self.metadata_path is not None:
                 kwargs['metadata_path'] = self.metadata_path
             self.listed_hyperstack.append(HyperspectralImage(**kwargs))
