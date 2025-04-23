@@ -10,8 +10,7 @@ from urllib.parse import urlparse
 
 import cv2
 import numpy as np
-from poetry.console.commands import self
-from pydantic import BaseModel, model_validator, field_validator, Field, computed_field, AfterValidator
+from pydantic import BaseModel, Field, computed_field, AfterValidator
 from tqdm.contrib import itertools
 
 DATA_PATH = Path.home() / ".hsdfmpm"
@@ -116,11 +115,10 @@ class ImageData(BaseModel):
         return self.hyperstack
 
     def reset(self):
-        self._active = self._hyperstack
+        self._hyperstack = None
+        self._active = self.hyperstack
 
     def __getitem__(self, item: int) -> np.ndarray:
-        if item > len(self):
-            raise IndexError(f'Index {item} out of range for ImageData with length {len(self)}')
         return self._active[item]
 
     def __len__(self) -> int:
@@ -129,8 +127,8 @@ class ImageData(BaseModel):
         else:
             return self._active.shape[-1]
 
-    def __array__(self):
-        return self._active
+    def __array__(self, dtype=None, copy=None):
+        return self._active.astype(dtype, copy=copy)
 
     def bin(self, bin_factor: int = 4):
         bands, h, w = self._active.shape
