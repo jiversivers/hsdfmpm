@@ -171,7 +171,7 @@ def prepare_src(src: np.ndarray, include_location: bool = False):
         X = np.column_stack([x.ravel(), y.ravel(), X])
     return X
 
-def read_hyperstack(img_dir: str, ext: str = '.tif') -> np.ndarray:
+def read_hyperstack(img_dir: str, ext: str = '.tif') -> np.ndarray[float]:
     hs = []
     for img_path in Path(img_dir).glob(f'*{ext}'):
         hs.append(cv2.imread(img_path, cv2.IMREAD_UNCHANGED))
