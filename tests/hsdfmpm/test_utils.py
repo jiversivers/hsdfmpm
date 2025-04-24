@@ -1,104 +1,124 @@
-import json
+import unittest
+from types import NoneType
+from unittest.mock import patch, MagicMock
 
+import cv2
 import numpy as np
-import pytest
-from hsdfmpm.utils import iterable_array, read_metadata_json
-
-def test_single_scalar():
-    result = iterable_array(5)
-    assert isinstance(result, np.ndarray)
-    assert result.shape == (1,)
-    assert result[0] == 5
-
-def test_list_input():
-    result = iterable_array([1, 2, 3])
-    assert isinstance(result, np.ndarray)
-    np.testing.assert_array_equal(result, np.array([1, 2, 3]))
-
-def test_tuple_input():
-    result = iterable_array((1, 2))
-    np.testing.assert_array_equal(result, np.array([1, 2]))
-
-def test_numpy_array_input():
-    arr = np.array([10, 20])
-    result = iterable_array(arr)
-    # Should return the same values
-    np.testing.assert_array_equal(result, arr)
-    # But not necessarily the same object (can still be safe)
-    assert isinstance(result, np.ndarray)
-
-def test_string_input():
-    result = iterable_array("abc")
-    # Strings are iterable, so it should return array(['a', 'b', 'c'])
-    np.testing.assert_array_equal(result, np.array("abc"))
-
-def test_none_input():
-    result = iterable_array(None)
-    np.testing.assert_array_equal(result, np.array([None]))
-
-def test_dict_input():
-    d = {'a': 1, 'b': 2}
-    result = iterable_array(d)
-    # Dicts are iterable by keys
-    np.testing.assert_array_equal(result, d)
-
-def test_set_input():
-    s = {1, 2, 3}
-    result = iterable_array(s)
-    # Sets are iterable, though unordered
-    assert set(result.tolist()) == s
+import numpy.testing as npt
+from pathlib import Path
+import hsdfmpm.utils as utils
+from hsdfmpm.utils import ImageData, SerializableModel
 
 
-@pytest.fixture
-def sample_metadata_file(tmp_path):
-    # Create a temporary JSON file with valid metadata
-    data = [
-        {"AbsTime": 1, "ExpTime": 100, "Filter": "A", "AvgInt": 123.4, "Wavelength": 500},
-        {"AbsTime": 2, "ExpTime": 200, "Filter": "B", "AvgInt": 567.8, "Wavelength": 600}
-    ]
-    file_path = tmp_path / "metadata.json"
-    file_path.write_text(json.dumps(data))
-    return file_path
+class TestUtilFunctions(unittest.TestCase):
+    def setUp(self):
+        self.test_file_path = '/path/to/totally/real.file'
+        self.test_dir_path = '/path/to/totally/real/dir'
 
-def test_read_metadata_json_valid(sample_metadata_file):
-    result = read_metadata_json(sample_metadata_file)
-    assert result['AbsTime'] == [1, 2]
-    assert result['ExpTime'] == [100, 200]
-    assert result['Filter'] == ["A", "B"]
-    assert result['AvgInt'] == [123.4, 567.8]
-    assert result['Wavelength'] == [500, 600]
+    def test_path_helpers(self):
+        self.assertRaises(FileNotFoundError, utils.is_file, '/path/to/nonexistent.file')
+        self.assertRaises(NotADirectoryError, utils.is_dir, '/path/to/nonexistent/dir')
+        with patch('pathlib.Path.is_file', return_value=True):
+            self.assertEqual(utils.ensure_path(self.test_file_path), Path(self.test_file_path))
+            self.assertEqual(utils.is_file(self.test_file_path), Path(self.test_file_path))
+        with patch('pathlib.Path.is_dir', return_value=True):
+            self.assertEqual(utils.is_dir(self.test_dir_path), Path(self.test_dir_path))
 
-def test_read_metadata_json_missing_fields(tmp_path):
-    data = [
-        {"AbsTime": 1, "ExpTime": 100},
-        {"Filter": "B", "Wavelength": 600}
-    ]
-    file_path = tmp_path / "partial.json"
-    file_path.write_text(json.dumps(data))
+    def test_channel_check(self):
+        # None in
+        channels = utils.channel_check(None)
+        self.assertIsInstance(channels, NoneType)
 
-    result = read_metadata_json(file_path)
-    assert result['AbsTime'] == [1, None]
-    assert result['ExpTime'] == [100, None]
-    assert result['Filter'] == [None, "B"]
-    assert result['AvgInt'] == [None, None]
-    assert result['Wavelength'] == [None, 600]
+        # Single int
+        val = 1
+        channels = utils.channel_check(val)
+        self.assertIsInstance(channels, list)
+        self.assertEqual(channels, [val])
 
-def test_read_metadata_json_invalid_json(tmp_path, capsys):
-    file_path = tmp_path / "bad.json"
-    file_path.write_text("{not: valid json}")
+        # One-element list in
+        channels = utils.channel_check([val])
+        self.assertIsInstance(channels, list)
+        self.assertEqual(channels, [val])
 
-    result = read_metadata_json(file_path)
-    captured = capsys.readouterr()
-    assert "Error decoding JSON" in captured.out
-    assert all(v == [] for v in result.values())  # all fields are empty
+        # List in
+        val = [1, 2, 3]
+        channels = utils.channel_check([1, 2, 3])
+        self.assertIsInstance(channels, list)
+        self.assertEqual(channels, val)
 
-def test_read_metadata_json_file_not_found(capsys):
-    result = read_metadata_json("non_existent_file.json")
-    captured = capsys.readouterr()
-    assert "File not found" in captured.out
-    assert all(v == [] for v in result.values())
+        # Tuple in
+        val = (1, 2, 3)
+        channels = utils.channel_check((1, 2, 3))
+        self.assertIsInstance(channels, tuple)
+        self.assertEqual(channels, val)
 
+    def test_iterable_array(self):
+        # Int in
+        val = 1
+        result = utils.iterable_array(val)
+        self.assertIsInstance(result, np.ndarray)
+        self.assertListEqual(result.tolist(), [val])
+
+        # List in
+        val = [1, 2, 3]
+        result = utils.iterable_array(val)
+        self.assertIsInstance(result, np.ndarray)
+        self.assertListEqual(result.tolist(), val)
+
+        # NDArray in
+        val = np.array([1, 2, 3])
+        result = utils.iterable_array(val)
+        self.assertIsInstance(result, np.ndarray)
+        npt.assert_array_equal(result, val)
+
+    def test_vectorize_img(self):
+        # 2D img
+        test_img = np.random.rand(10, 10)
+        result = utils.vectorize_img(test_img)
+        self.assertEqual(result.shape, (100,1))
+        npt.assert_array_equal(result, test_img.ravel()[...,np.newaxis])
+
+        # 3D img
+        test_img = np.random.rand(3, 10, 10)
+        result = utils.vectorize_img(test_img)
+        self.assertEqual(result.shape, (100, 3))
+        npt.assert_array_equal(result, np.column_stack([test_img[0].flatten(), test_img[1].flatten(), test_img[2].flatten()]))
+
+        # With locations
+        result = utils.vectorize_img(test_img, include_location=True)
+        self.assertEqual(result.shape, (100, 5))
+        y = np.repeat(10 * np.arange(-0.5, 0.51, 1/9), 10).reshape(10, 10)
+        x = y.T
+        npt.assert_array_equal(result[:, 0], x.flatten())
+        npt.assert_array_equal(result[:, 1], y.flatten())
+
+    def test_read_hyperstack(self):
+        img = np.random.rand(10, 10)
+        fake_paths = [
+            Path('some_file.tif'),
+            Path('some_file2.tif'),
+            Path('some_file3.tif'),
+        ]
+
+        with patch('pathlib.Path.glob') as globber:
+            with patch('cv2.imread') as opener:
+                # 3D Image
+                globber.return_value = fake_paths
+                opener.side_effect = [img, 2 * img, 3 * img]
+                hs = utils.read_hyperstack('some/dir', ext='.tif')
+                self.assertEqual(opener.call_count, 3)
+                self.assertEqual(hs.shape, (3, 10, 10))
+                npt.assert_array_equal(hs, np.stack([img, 2 * img, 3 * img]))
+                self.assertEqual(opener.call_args_list[0][0][0], fake_paths[0])
+                self.assertEqual(hs.dtype, np.float64)
+
+                # 2D image
+                globber.return_value = [fake_paths[0]]
+                opener.side_effect = [img]
+                hs = utils.read_hyperstack('some/dir', ext='.tif')
+                self.assertEqual(opener.call_count, 4)
+                self.assertEqual(hs.shape, (1, 10, 10))
 
 
 if __name__ == '__main__':
-    pytest.main()
+    unittest.main()
