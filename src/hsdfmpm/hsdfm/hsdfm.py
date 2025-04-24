@@ -31,7 +31,7 @@ class HyperspectralImage(ImageData):
 
         # Load hyperstack
         hyperstack = read_hyperstack(img_dir=self.image_path, ext=self.image_ext)
-        self._hyperstack = hyperstack
+        self._hyperstack = hyperstack.copy()
         try:
             self._hyperstack /= self.scalar
             scale_after_masking = False
