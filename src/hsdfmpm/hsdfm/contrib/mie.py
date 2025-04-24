@@ -156,13 +156,13 @@ def mie_scatter_and_anisotropy(
     :type sphere_type: str
     :returns: Tuple of four 1D arrays, each of length N = ⌊(l_max−l_min)/dl⌋+1:
 
-        - **wavelengths**: Wavelengths (μm).  
+        - **wavelengths**: Wavelengths (nm).
         - **Qsca**: Total scattering efficiency (1/μm³).  
         - **Qback**: Backscattering efficiency (1/μm³).  
         - **g**: Anisotropy parameter ⟨cos θ⟩.  
     :rtype: tuple(numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray)
     """
-
+    wavelengths = wavelengths.copy() * 1e-3 # nm -> um
     N = wavelengths.size
 
     Qsca = np.zeros(N, dtype=float)
@@ -192,10 +192,7 @@ def mie_scatter_and_anisotropy(
         Qback[i] = F[6].real
         g[i] = F[7].real
 
-    return wavelengths, Qsca, Qback, g
-
-
-import numpy as np
+    return wavelengths * 1e3, Qsca, Qback, g
 
 
 def compute_volume_distribution_by_scattering(
@@ -311,6 +308,7 @@ def compute_volume_distribution_by_bead_number(
 
     return volume_dist_ul, updated_redscat_coef_mm_inv
 
+
 def generate_phantom_profiles(
         *,
         wavelengths: np.ndarray[float],
@@ -360,26 +358,28 @@ def generate_phantom_profiles(
       - **musp_profiles_cm_inv_beads** (list[np.ndarray]):
         full μₛ′(λ) curves in cm⁻¹ for each phantom (mode 'beads' or 'both').
     """
+    out = {}
+
     # --- 0) convert units ---
-    wavelengths = wavelengths.copy() * 1e-3  # nm -> um
-    ref_wavelength *= 1e-3  # nm -> um
     if red_scat_coef is not None:
         red_scat_coef /= 10  # cm-1 -> mm_1
+
+    # find the index of the reference wavelength, extending if outside the range
+    if wavelengths.min() <= ref_wavelength <= wavelengths.max():
+        # If ref wavelength is in the range of wavelengths
+        extended = False
+        idx = np.argmin(np.abs(wavelengths - ref_wavelength))
+    else:
+        extended = True
+        wavelengths = np.append(wavelengths, ref_wavelength)
+        idx = len(wavelengths) - 1
 
     # --- 1) get the red‑scattering cross‑section curve per sphere ---
     wavelengths_um, Qsca, Qback, g = mie_scatter_and_anisotropy(
         wavelengths=wavelengths,
         r=bead_radius_um, sphere_type=sphere_type
     )
-    wavelengths_nm = wavelengths_um * 1e3
     sigma_scat_um2 = Qsca * np.pi * bead_radius_um ** 2 * (1.0 - g)
-
-    # find the index of the reference wavelength
-    idx = np.argmin(np.abs(wavelengths_um - ref_wavelength))
-
-    out = {
-        "wavelengths_nm": wavelengths_nm,
-    }
 
     # --- 2a) scattering mode: target μₛ′ → bead volumes ---
     if mode in ("scattering", "both"):
@@ -395,7 +395,7 @@ def generate_phantom_profiles(
         )
         bead_ul = vol_dist[:, 0]  # first column = bead volumes
         out["bead_volumes_ul_scatter"] = bead_ul
-        out["volume_distribution_scatter_ul"] = vol_dist.squeeze()
+        out["volume_distribution_scatter_ul"] = vol_dist.squeeze()[:-1] if extended else vol_dist.squeeze()
 
     # --- 2b) bead mode: bead volumes → resulting μₛ′ ---
     if mode in ("beads", "both"):
@@ -415,7 +415,7 @@ def generate_phantom_profiles(
             red_scat_curve=sigma_scat_um2,
             ref_wavelength_idx=idx,
         )
-        out["volume_distribution_bead_ul"] = vol_dist_b.squeeze()
+        out["volume_distribution_bead_ul"] = vol_dist_b.squeeze()[:-1] if extended else vol_dist_b.squeeze()
 
     # --- 3) build full μₛ′(λ) in cm⁻¹ curves for each phantom ---
     # density = μₛ′(mm⁻¹)/(σ_scat_um2[idx]*1e3) ;  factor = 1e4 (scattering mode)
@@ -423,18 +423,16 @@ def generate_phantom_profiles(
     if mode in ("scattering", "both"):
         density_sc = red_scat_coef / (sigma_scat_um2[idx] * 1e3)
         factor_sc = 1e4
-        out["musp_profiles_cm_inv_scatter"] = np.array([
-            sigma_scat_um2 * d * factor_sc
-            for d in np.atleast_1d(density_sc)
-        ]).squeeze()
+        musp_profiles_cm_inv_scatter = np.array([sigma_scat_um2 * d * factor_sc for d in np.atleast_1d(density_sc)]).squeeze()
+        out["musp_profiles_cm_inv_scatter"] = musp_profiles_cm_inv_scatter[:-1] if extended else musp_profiles_cm_inv_scatter
     if mode in ("beads", "both"):
         # extract densities from mu_mm:  mu_mm = density * σ_scat_um2[idx] *1000
         dens_b = np.array(mu_mm) / (sigma_scat_um2[idx] * 1e3)
         factor_b = 10
-        out["musp_profiles_cm_inv_beads"] = np.array([
-            sigma_scat_um2 * d * factor_b
-            for d in dens_b
-        ]).squeeze()
+        musp_profiles_cm_inv_beads = np.array([sigma_scat_um2 * d * factor_b for d in dens_b]).squeeze()
+        out["musp_profiles_cm_inv_beads"] = musp_profiles_cm_inv_beads[:-1] if extended else musp_profiles_cm_inv_beads
 
+
+    out["wavelengths_nm"] = wavelengths_um[:-1] if extended else wavelengths_um
     return out
 
