@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from hsdfmpm.hsdfm import hsdfm
 
-class TestHsdfm(unittest.TestCase):
+class TestUtils(unittest.TestCase):
 
     def test_model_type_alias(self):
         # Verify that alias values resolve to the correct ModelType member.
