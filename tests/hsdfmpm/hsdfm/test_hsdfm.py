@@ -5,28 +5,8 @@ import numpy as np
 import numpy.testing as npt
 from unittest.mock import patch, MagicMock
 from hsdfmpm.hsdfm.hsdfm import HyperspectralImage, MergedHyperspectralImage
+from tests.__test_utils__ import patch_path_validators, add_patch_data
 
-def patch_path_validators(self):
-    # Patches for file-paths (one-time patch for the test)
-    is_dir_patch = patch('pathlib.Path.is_dir', return_value=True)
-    is_file_patch = patch('pathlib.Path.is_file', return_value=True)
-    glob_patch = patch('pathlib.Path.glob', return_value=['/path/to/metadata.json'])
-
-    self.mock_is_dir = is_dir_patch.start()
-    self.mock_is_file = is_file_patch.start()
-    self.mock_glob = glob_patch.start()
-
-    self.addCleanup(is_dir_patch.stop)
-    self.addCleanup(is_file_patch.stop)
-    self.addCleanup(glob_patch.stop)
-
-def add_patch_data(self):
-    self.md_vals = {'ExpTime': [2, 4],
-                    'Wavelength': [500, 510]}
-    self.sel_wl_idx = 0
-    self.hs_vals = np.array([[[1, 2], [3, 4]],
-                             [[5, 6], [7, 8]]], dtype=np.float64)
-    self.scalar = 2
 
 class TestHyperspectralImage(unittest.TestCase):
     def setUp(self):
@@ -43,14 +23,14 @@ class TestHyperspectralImage(unittest.TestCase):
         with patch('hsdfmpm.hsdfm.hsdfm.read_metadata_json', return_value=self.md_vals):
             with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.std_arr):
                 self.mock_std = MergedHyperspectralImage(image_paths=['dummy/path2', 'dummy/path2'])
-                # self.mock_std = HyperspectralImage(image_path='dummy/path2')
+                self.mock_std = HyperspectralImage(image_path='dummy/path2')
 
             with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.bg_arr):
                 self.mock_bg = HyperspectralImage(image_path='dummy/path')
 
             with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.hs_vals):
                 self.hsi = HyperspectralImage(image_path="dummy_path")
-                self.hsi_subset = HyperspectralImage(image_path="dummy_path", wavelengths=[self.md_vals['Wavelength'][self.sel_wl_idx]])
+                self.hsi_subset = HyperspectralImage(image_path="dummy_path", wavelengths=[self.md_vals['Wavelength'][wl] for wl in self.sel_wl_idx])
                 self.hsi_with_scalar = HyperspectralImage(image_path="dummy_path", scalar=self.scalar)
                 self.hsi_with_array_scalar = HyperspectralImage(image_path="dummy_path", scalar=self.hs_vals/self.scalar)
                 self.hsi_with_standard = HyperspectralImage(image_path="dummy_path", standard=self.mock_std, background=self.mock_bg)
@@ -63,10 +43,10 @@ class TestHyperspectralImage(unittest.TestCase):
         npt.assert_array_equal(self.hsi._active, self.hsi._hyperstack)
 
         # With wavelength mask
-        self.assertEqual(self.hsi_subset.metadata['ExpTime'], [self.md_vals['ExpTime'][self.sel_wl_idx]])
-        self.assertEqual(self.hsi_subset.metadata['Wavelength'], [self.md_vals['Wavelength'][self.sel_wl_idx]])
+        self.assertEqual(self.hsi_subset.metadata['ExpTime'], [self.md_vals['ExpTime'][wl] for wl in self.sel_wl_idx])
+        self.assertEqual(self.hsi_subset.metadata['Wavelength'], [self.md_vals['Wavelength'][wl] for wl in self.sel_wl_idx])
         self.assertTrue(self.hsi_subset._active.shape == (1, 2, 2))
-        npt.assert_array_equal(self.hsi_subset._active.squeeze(), self.hs_vals[self.sel_wl_idx])
+        npt.assert_array_equal(self.hsi_subset._active, self.hs_vals[self.sel_wl_idx])
 
         # With scalar scalar
         self.assertEqual(self.hsi_with_scalar.metadata['ExpTime'], self.md_vals['ExpTime'])
@@ -135,7 +115,6 @@ class TestMergedHyperspectralImage(unittest.TestCase):
             self.assertEqual(mhsi.metadata, self.md_vals)
             self.assertEqual(mhsi.metadata_path, Path(self.md_path))
 
-
     def test_listed_attr(self):
         metadata = self.mhsi.metadata
         for md in metadata:
@@ -149,7 +128,6 @@ class TestMergedHyperspectralImage(unittest.TestCase):
         npt.assert_array_equal(self.mhsi[0]._hyperstack, self.expected_list[0])
         for mhsi, el in zip(self.mhsi, self.expected_list):
             npt.assert_array_equal(mhsi._hyperstack, el)
-
 
 
 if __name__ == '__main__':
