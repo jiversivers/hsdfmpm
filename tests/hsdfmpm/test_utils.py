@@ -8,6 +8,7 @@ import numpy.testing as npt
 from pathlib import Path
 import hsdfmpm.utils as utils
 from hsdfmpm.utils import ImageData, SerializableModel
+from tests.__test_utils__ import patch_path_validators, add_patch_hsdfm_data
 
 
 class TestUtilFunctions(unittest.TestCase):
@@ -119,6 +120,33 @@ class TestUtilFunctions(unittest.TestCase):
                 self.assertEqual(opener.call_count, 4)
                 self.assertEqual(hs.shape, (1, 10, 10))
 
+class TestImageData(unittest.TestCase):
+    def setUp(self):
+        patch_path_validators(self)
+        add_patch_hsdfm_data(self)
+        self.img = ImageData(image_path='some/path', metadata_ext='.xml')
+
+    def test_hyperstack(self):
+        # When _hyperstack is yet unloaded
+        with patch('hsdfmpm.utils.read_hyperstack', return_value=self.hs_vals):
+            npt.assert_array_equal(self.img.hyperstack, self.hs_vals)
+
+        # When _hyperstack has already loaded
+        self.img._hyperstack = 2 * self.hs_vals
+        npt.assert_array_equal(self.img.hyperstack, 2 * self.hs_vals)
+
+        # When channels are selected
+        self.img.channels = [0]
+        npt.assert_array_equal(self.img.hyperstack, 2 * self.hs_vals[[0]])
+
+    def test_reset(self):
+        # This loads the hyperstack
+        with patch('hsdfmpm.utils.read_hyperstack', return_value=self.hs_vals):
+            npt.assert_array_equal(self.img.hyperstack, self.hs_vals)
+        self.img._hyperstack += 1
+        npt.assert_array_equal(self.img._hyperstack, self.hs_vals + 1)
+        self.img.reset()
+        npt.assert_array_equal(self.img.hyperstack, self.hs_vals)
 
 if __name__ == '__main__':
     unittest.main()

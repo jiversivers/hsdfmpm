@@ -4,14 +4,15 @@ from pathlib import Path
 import numpy as np
 import numpy.testing as npt
 from unittest.mock import patch, MagicMock
+
 from hsdfmpm.hsdfm.hsdfm import HyperspectralImage, MergedHyperspectralImage
-from tests.__test_utils__ import patch_path_validators, add_patch_data
+from tests.__test_utils__ import patch_path_validators, add_patch_hsdfm_data
 
 
 class TestHyperspectralImage(unittest.TestCase):
     def setUp(self):
         patch_path_validators(self)
-        add_patch_data(self)
+        add_patch_hsdfm_data(self)
 
         # Mocking normalization arrays
         self.std_arr = np.array([[[2, 1], [1, 2]],
@@ -97,10 +98,24 @@ class TestHyperspectralImage(unittest.TestCase):
         self.hsi.normalize_integration_time.assert_called_once()
         self.hsi.normalize_to_standard.assert_not_called()
 
+    def test_get(self):
+        wavelength = self.md_vals['Wavelength'][1]
+        npt.assert_array_equal(self.hsi.get(wavelength), self.hs_vals[1])
+
+    # Covers baseclass imagedata tests below
+    def test_shape(self):
+        npt.assert_array_equal(self.hsi.shape, self.hs_vals.shape)
+
+    def test_bin(self):
+        self.hsi.bin(bin_factor=2)
+        npt.assert_array_equal(self.hsi, self.hs_vals.mean(axis=(1,2), keepdims=True))
+
+    # TODO: Test apply kernel bank
+    # TODO: Test apply mask
 class TestMergedHyperspectralImage(unittest.TestCase):
     def setUp(self):
         patch_path_validators(self)
-        add_patch_data(self)
+        add_patch_hsdfm_data(self)
         self.expected_list = [self.hs_vals - 1, self.hs_vals, self.hs_vals + 1]
         self.md_path = 'this/is/on/listed'
 

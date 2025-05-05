@@ -121,13 +121,13 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(result.shape, (1, 2, 2))
         np.testing.assert_allclose(result[0, 0, 0], expected_std)
 
-    @patch('hsdfmpm.hsdfm.hsdfm.prepare_src')
-    def test_k_cluster(self, mock_prepare_src):
-        # Patch prepare_src to return a dummy 2D array.
+    @patch('hsdfmpm.hsdfm.hsdfm.vectorize_img')
+    def test_k_cluster(self, mock_vectorize_img):
+        # Patch vectorize_img to return a dummy 2D array.
         dummy_src = np.zeros((1, 2, 2))
         # For a 1-channel 2x2 image, assume 4 samples and 1 feature per sample.
         X_dummy = np.array([[0], [1], [2], [3]], dtype=float)
-        mock_prepare_src.return_value = X_dummy
+        mock_vectorize_img.return_value = X_dummy
 
         # Call k_cluster with k=2.
         labels = hsdfm.k_cluster(dummy_src, k=2, include_location=False)
