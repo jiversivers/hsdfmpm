@@ -2,6 +2,8 @@ from functools import cache
 from typing import Optional
 
 from pydantic import model_validator, BaseModel, SkipValidation
+from tqdm.contrib import itertools
+import scipy.optimize as opt
 
 from .utils import *
 from ..utils import ImageData, read_hyperstack, add_arithmetic_methods
@@ -27,7 +29,7 @@ class HyperspectralImage(ImageData):
         metadata_path = list(self.image_path.glob(f'*{self.metadata_ext}'))[0]
 
         # Load image metadata
-        self.metadata = read_metadata_json(metadata_path)
+        self.metadata = read_metadata_json(metadata_path).copy()
 
         # Load hyperstack
         hyperstack = read_hyperstack(img_dir=self.image_path, ext=self.image_ext)
@@ -63,9 +65,46 @@ class HyperspectralImage(ImageData):
         if self.standard is not None and self.background is not None:
             self.normalize_to_standard()
 
+    def get(self, wavelength: float) -> np.ndarray[float]:
+        """Method to streamline selection of specific wavelengths from the image stack."""
+        for wl in self.metadata['Wavelength']:
+            if wl == wavelength:
+                return self[self.metadata['Wavelength'].index(wl)]
+
     @cache
-    def fit(self, model: ModelType = 'monte_carlo', **kwargs):
-        pass
+    def fit(self, model: Callable[[float, float, ...], np.ndarray[float]],
+            guess: list[float], bounds: list[tuple[float, float]]) -> tuple[np.ndarray[float], np.ndarray[bool]]:
+
+        # Get image shape
+        image_shape = self.shape
+
+        # Mask nans
+        nan_mask = np.logical_or(np.isnan(self), np.isinf(self))
+
+        # Create 0 output array
+        out_image = np.zeros((len(bounds),) + image_shape[1:])
+        params = guess
+        for i, j in itertools.product(range(image_shape[1]), range(image_shape[2])):
+            # Get current voxel
+            r = self[:, i, j]
+            mask = nan_mask[:, i, j]
+
+            # Remove nan values
+            if np.any(mask):
+                r = r[~mask]
+                wavelengths = self.wavelengths[~mask]
+            try:
+                params, _ = opt.curve_fit(model, wavelengths, r, p0=params, bounds=bounds)
+            except RuntimeError:
+                params = [np.nan] * 4
+
+            # Store fitted out
+            out_image[:, i, j] = params
+
+            # Update guess to params for faster convergence
+            params = guess if np.isnan(params).any() else params
+
+        return out_image, nan_mask
 
     def k_cluster(self, k: Union[int, list[int]] = 2):
         if isinstance(k, int):
