@@ -1,58 +1,19 @@
+import itertools
 import json
-import os
 from pathlib import Path
 
 import numpy as np
 
 from numpy.lib._stride_tricks_impl import as_strided
+from photon_canon.lut import LUT
+from skimage.filters import gabor_kernel
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 from enum import Enum
 from typing import Callable, Union
 
-from ..utils import prepare_src, ensure_path
-
-
-def handle_full_mc():
-    print("Fitting with full Monte Carlo")
-
-def handle_full_diff():
-    print("Fitting with full Diffusion")
-
-def handle_abs_mc():
-    print("Fitting with absorption Monte Carlo")
-
-def handle_abs_diff():
-    print("Fitting with absorption Diffusion")
-
-class ModelType(str, Enum):
-    FULL_MC = 'full-mc'
-    FULL_DIFF = 'full-diff'
-    ABS_MC = 'abs-mc'
-    ABS_DIFF = 'abs-diff'
-
-    @property
-    def handler(self) -> Callable:
-        return {
-            ModelType.FULL_MC: handle_full_mc,
-            ModelType.FULL_DIFF: handle_full_diff,
-            ModelType.ABS_MC: handle_abs_mc,
-            ModelType.ABS_DIFF: handle_abs_diff,
-        }[self]
-
-    @classmethod
-    def _missing_(cls, value: str):
-        """Allow alias values to resolve to existing Enum members"""
-        aliases = {
-            'monte-carlo': cls.FULL_MC,
-            'mc': cls.FULL_MC,
-            'diffusion': cls.FULL_DIFF,
-            'diff': cls.FULL_DIFF,
-        }
-        if value in aliases:
-            return aliases[value]
-        return super()._missing_(value)
+from ..utils import vectorize_img, ensure_path, iterable_array
 
 def read_metadata_json(file_path):
     grouped_metadata = {
@@ -112,7 +73,7 @@ def k_cluster_macro(src, ks, slice_to_take=None):
 
 def k_cluster(src, k=3, include_location=False):
     shape = src.shape[-2:]
-    X = prepare_src(src, include_location=include_location)
+    X = vectorize_img(src, include_location=include_location)
     if include_location:
         X = StandardScaler().fit_transform(X)
     kmeans = KMeans(n_clusters=k, random_state=42, n_init='auto', init='random').fit(X)
@@ -172,3 +133,15 @@ def find_cycles(root: Union[str, Path], search_term='metadata.json') -> list[Pat
                 found_paths.append(Path(path))
                 break
     return found_paths
+
+def gabor_filter_bank(frequency=1, theta_step=np.radians(15), sigma_x=None, sigma_y=None, offset=None):
+    theta = np.arange(0, np.pi, theta_step)
+    freqs = iterable_array(frequency)
+    sigma_x = iterable_array(sigma_x) if sigma_x is not None else 1.5 / freqs
+    sigma_y = iterable_array(sigma_y) if sigma_y is not None else 0.5 / freqs
+    offset = iterable_array(offset) if offset is not None else np.zeros_like(freqs)
+    kernels = [
+        np.abs(gabor_kernel(frequency=f, theta=t, sigma_x=sx, sigma_y=sy, offset=o))
+        for t, (f, sx, sy, o) in itertools.product(theta, zip(freqs, sigma_x, sigma_y, offset))
+    ]
+    return kernels
