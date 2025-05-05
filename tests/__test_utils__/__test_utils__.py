@@ -18,11 +18,15 @@ def patch_path_validators(self):
     self.addCleanup(glob_patch.stop)
 
 
-def add_patch_data(self):
-    """Helper for testing to add patch data to the test object."""
+def add_patch_hsdfm_data(self):
+    """Helper for testing to add patch hsdfm data to the test object."""
     self.md_vals = {'ExpTime': [2, 4],
                     'Wavelength': [500, 510]}
     self.sel_wl_idx = [0]
     self.hs_vals = np.array([[[1, 2], [3, 4]],
                              [[5, 6], [7, 8]]], dtype=np.float64)
     self.scalar = 2
+
+def add_patch_mpm_data(self):
+    """Helper for testing to add patch mpm data to the test object."""
+    pass
