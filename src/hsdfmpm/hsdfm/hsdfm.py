@@ -16,7 +16,6 @@ class HyperspectralImage(ImageData):
 
     :param image_path: str; The directory path of the HSDFM image cube and JSON metadata file.
     """
-    model: ModelType = 'monte_carlo'
     metadata_ext: str = 'metadata.json'
     image_ext: str = '.tiff'
     standard: Optional[SkipValidation[Union['MergedHyperspectralImage', 'HyperspectralImage']]] = None
