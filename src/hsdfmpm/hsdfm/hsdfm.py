@@ -105,11 +105,6 @@ class HyperspectralImage(ImageData):
 
         return out_image, nan_mask
 
-    def k_cluster(self, k: Union[int, list[int]] = 2):
-        if isinstance(k, int):
-            k = [k]
-        pass
-
 @add_arithmetic_methods
 class MergedHyperspectralImage(BaseModel):
     """
