@@ -10,11 +10,72 @@ from urllib.parse import urlparse
 
 import cv2
 import numpy as np
-from pydantic import BaseModel, Field, computed_field, AfterValidator
+from pydantic import BaseModel, Field, computed_field, AfterValidator, model_validator
 from tqdm.contrib import itertools
 
 DATA_PATH = Path.home() / ".hsdfmpm"
 DATA_PATH.mkdir(exist_ok=True, parents=True)
+
+# Path helpers
+def ensure_path(path_like: Union[str, Path]) -> Path:
+    if isinstance(path_like, Path):
+        return path_like
+    if isinstance(path_like, str):
+        if path_like.startswith("file://"):
+            return Path(urlparse(path_like).path)
+        return Path(path_like)
+    if isinstance(path_like, NoneType):
+        warnings.warn("'ensure_path' got NoneType, but expected str or Path object.", UserWarning, stacklevel=2)
+        return None
+    raise TypeError(f"Cannot convert {type(path_like)} to Path")
+
+def is_file(file_path: str) -> Path:
+    file_path = ensure_path(file_path)
+    if not file_path.is_file():
+        raise FileNotFoundError(file_path)
+    print('File passed')
+    return file_path
+
+def is_dir(file_path: str) -> Path:
+    file_path = ensure_path(file_path)
+    if not file_path.is_dir():
+        raise NotADirectoryError(file_path)
+    return file_path
+
+# Helper for dtype conversion
+def iterable_array(x: Any) -> Iterable[Any]:
+    x = [x] if not isinstance(x, Iterable) else x
+    return np.array(x)
+
+# Helper function to handle reshaping input images
+def vectorize_img(img: np.ndarray, include_location: bool = False) -> np.ndarray:
+    if img.ndim <= 2:
+        shape = img.shape
+        X = img.reshape(-1, 1)
+    elif img.ndim == 3:
+        shape = img.shape[1:]
+        X = img.reshape(img.shape[0], -1).T
+    if include_location:
+        x, y = np.meshgrid(np.linspace(-0.5, 0.5, shape[0]) * shape[0], np.linspace(-0.5, 0.5, shape[1]) * shape[1])
+        X = np.column_stack([x.ravel(), y.ravel(), X])
+    return X
+
+# Image reader
+def read_hyperstack(img_dir: str, ext: str = '.tif') -> np.ndarray[float]:
+    hs = []
+    for img_path in Path(img_dir).glob(f'*{ext}'):
+        hs.append(cv2.imread(img_path, cv2.IMREAD_UNCHANGED))
+    if not img_path:
+        raise FileNotFoundError(f"No image files found in {img_dir}.")
+    hs = np.stack(hs, dtype=np.float64)
+    while hs.ndim < 3:
+        hs = np.expand_dims(hs, axis=0)
+    return hs
+
+def apply_kernel_bank(src: np.ndarray[float], bank: np.ndarray[float]) -> np.ndarray[float]:
+    return np.nanmax([
+            cv2.filter2D(src, -1, k) for (k,) in itertools.product(bank)
+        ], axis=0)
 
 # Define the class decorator
 def add_arithmetic_methods(cls):
@@ -47,18 +108,6 @@ def add_arithmetic_methods(cls):
         setattr(cls, name, method)
 
     return cls
-
-def is_file(file_path: str) -> Path:
-    file_path = ensure_path(file_path)
-    if not file_path.is_file():
-        raise FileNotFoundError(file_path)
-    return file_path
-
-def is_dir(file_path: str) -> Path:
-    file_path = ensure_path(file_path)
-    if not file_path.is_dir():
-        raise NotADirectoryError(file_path)
-    return file_path
 
 @overload
 def channel_check(channels: NoneType) -> NoneType: ...
@@ -101,7 +150,6 @@ class ImageData(BaseModel):
         hyperstack = self._hyperstack.copy()  # So channels can be selected after initialization
         if self.channels is not None:
             hyperstack = np.stack([self._hyperstack[ch] for ch in self.channels], axis=0)
-
         return hyperstack
 
     @computed_field
@@ -127,6 +175,11 @@ class ImageData(BaseModel):
         else:
             return self._active.shape[-1]
 
+    @computed_field
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return self._active.shape
+
     def __array__(self, dtype=None, copy=None):
         return self._active.astype(dtype, copy=copy)
 
@@ -148,49 +201,11 @@ class ImageData(BaseModel):
         # Average over binning axes
         self._active = cube_reshaped.mean(axis=(2, 4))
 
-    def apply_kernel_bank(self, kernel_bank):
-        self._active = np.nanmax([
-            cv2.filter2D(self.hyperstack, -1, k) for (k,) in itertools.product(kernel_bank)
-        ], axis=0)
+    def apply_kernel_bank(self, kernel_bank: np.ndarray) -> np.ndarray:
+        return apply_kernel_bank(self, kernel)
 
-# Helper for dtype conversion
-def iterable_array(x: Any) -> Iterable[Any]:
-    x = [x] if not isinstance(x, Iterable) else x
-    return np.array(x)
-
-# Helper function to handle reshaping input images
-def prepare_src(src: np.ndarray, include_location: bool = False):
-    if src.ndim <= 2:
-        shape = src.shape
-        X = src.reshape(-1,1)
-    elif src.ndim == 3:
-        shape = src.shape[1:]
-        X = src.reshape(src.shape[0], -1).T
-    if include_location:
-        x, y = np.meshgrid(np.linspace(-0.5, 0.5, shape[0]) * shape[0], np.linspace(-0.5, 0.5, shape[1]) * shape[1])
-        X = np.column_stack([x.ravel(), y.ravel(), X])
-    return X
-
-def read_hyperstack(img_dir: str, ext: str = '.tif') -> np.ndarray[float]:
-    hs = []
-    for img_path in Path(img_dir).glob(f'*{ext}'):
-        hs.append(cv2.imread(img_path, cv2.IMREAD_UNCHANGED))
-    hs = np.stack(hs, dtype=np.float64)
-    while hs.ndim < 3:
-        hs = np.expand_dims(hs, axis=0)
-    return hs
-
-def ensure_path(path_like: Union[str, Path]) -> Path:
-    if isinstance(path_like, Path):
-        return path_like
-    if isinstance(path_like, str):
-        if path_like.startswith("file://"):
-            return Path(urlparse(path_like).path)
-        return Path(path_like)
-    if isinstance(path_like, NoneType):
-        warnings.warn("'ensure_path' got NoneType, but expected str or Path object.", UserWarning, stacklevel=2)
-        return None
-    raise TypeError(f"Cannot convert {type(path_like)} to Path")
+    def apply_mask(self, mask):
+        self._active[mask] = np.nan
 
 class SerializableModel(BaseModel):
     __version__ = "0.0.1"
@@ -229,23 +244,3 @@ class SerializableModel(BaseModel):
                 f"Loaded version {version} of {cls.__class__.__name__}",
                 stacklevel=2
             )
-
-#TODO: Fix this so it actually updates the saved irf model
-def autoversion(major=1, minor=0):
-    """
-    Decorator to auto-increment the patch version of a model on each load.
-    """
-
-    def decorator(cls):
-        # Find the current patch count (based on how many times class is defined)
-        patch = getattr(cls, "_version_patch", 0) + 1
-        version_str = f"{major}.{minor}.{patch}"
-        cls.__version__ = version_str
-        cls._version_patch = patch
-
-        # Inject version into model field default
-        if "model_version" not in cls.model_fields:
-            cls.model_version = version_str  # fallback if not using Field()
-        return cls
-
-    return decorator
