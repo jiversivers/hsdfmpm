@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import Union, Optional, Callable
+from pathlib import Path
 
 import numpy as np
-from matplotlib import cm
-from matplotlib.colors import ListedColormap, Colormap, LinearSegmentedColormap
 
-from hsdfmpm.mpm.utils import LaserFlag, TRANSFER_FUNCTION_DATA
-from hsdfmpm.utils import iterable_array
+
+from ..utils import LaserFlag, TRANSFER_FUNCTION_DATA
+from ...utils import iterable_array, ensure_path
 
 def get_transfer_function(
         date: datetime, laser_flag: Union[str, LaserFlag]
@@ -29,7 +29,7 @@ def get_transfer_function(
                  pmt: Optional[Union[int, list[int]]] = None) -> np.ndarray:
         """
         This function applies the appropriate adjustments to an input image of either 1 channel (shape: H x W). In this
-         mode, a specific Index must be specified to tell the funciton which PMT offset to use. Alternatively, the image
+         mode, a specific Index must be specified to tell the function which PMT offset to use. Alternatively, the image
          can have N channels (shape: N x H x W) where N is equal to the number of PMT offsets (typically, 4).
 
         :param gain: The PMT gain setting(s) of the image.
@@ -47,42 +47,33 @@ def get_transfer_function(
         shape = img.shape
         img = img.reshape((-1, *shape[-2:]))
 
+        # Prepare for matops
+        gain = iterable_array(gain)
+        pmt = iterable_array(pmt) if pmt is not None else np.arange(img.shape[0])
+        pmt_mask = np.array([i in pmt for i in range(len(offsets))])
+        offset = offsets[pmt_mask].reshape((-1, 1, 1))
+        gain = gain[pmt_mask].reshape((-1, 1, 1))
+
         # Check the size/pmt-index/gain match (see docstring)
-        if img.shape[0] == 1 and pmt is None or img.shape[0] != len(offsets):
+        if img.shape[0] == 1 and pmt is None or img.shape[0] != len(offset):
             raise RuntimeError(f'No PMT index given for image with {img.shape[0]} channels.')
         if len(gain) != img.shape[0]:
             raise RuntimeError(f'Ambiguous PMT gain list if length {len(gain)} for image with {img.shape[0]} channels.')
 
-        # Prepare for matops
-        gain = iterable_array(gain).reshape(-1, 1, 1)
-        pmt = iterable_array(pmt) if pmt is not None else np.ones_like(gain, dtype=int)
-        offset = offsets.reshape((-1, 1, 1))
-
         # Calculate transfer function
         g = params[0] * gain ** params[1]
 
-        img = ((img - offset[pmt]) / (pwr ** 2)) / g
+        img = ((img - offset) / (pwr ** 2)) / g
 
         return img
 
     return transfer
 
-def truncate_colormap(cmap: Optional[Union[Colormap, np.ndarray[float], str]] = None,
-                      cmin: float = 0, cmax: float = 1, n: int = 100):
-    cmap = get_cmap(cmap)
-    new_colors = cmap(np.linspace(cmin, cmax, n))
-    return LinearSegmentedColormap.from_list('truncated_cmap', new_colors, N=n)
-
-def get_cmap(cmap: Optional[Union[Colormap, np.ndarray[float], str]] = None):
-    if not isinstance(cmap, Colormap):
-        if isinstance(cmap, np.ndarray):
-            cmap = ListedColormap(cmap)
-        elif isinstance(cmap, str):
-            cmap = cm.get_cmap(cmap)
-        elif cmap is None:
-            cmap = cm.get_cmap('jet')
-        else:
-            raise TypeError(
-                f"cmap must be either a Colormap, str, or None to default to 'jet', but got type {type(cmap)}"
-            )
-    return cmap
+def find_dated_power_file(date: str | datetime, power_directory: str | Path) -> Path:
+    if isinstance(date, datetime):
+        date = datetime.strftime(date, '%m%d%Y')
+    power_directory = ensure_path(power_directory)
+    power_files = sorted(power_directory.glob(f'*{date}*.xls*')) + sorted(power_directory.glob(f'*{date}*.csv'))
+    if not power_files:
+        raise FileNotFoundError(f"No power file found for date {date}.")
+    return power_files[0]
