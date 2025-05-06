@@ -11,7 +11,7 @@ from scipy.ndimage import median_filter
 from hsdfmpm.mpm.flim.utils import open_sdt_file_with_json_metadata, cartesian_from_polar, polar_from_cartesian, \
     lifetime_from_cartesian, polar_from_lifetime, get_phasor_coordinates, find_intersection_with_circle, \
     project_to_line, fit_phasor, get_endpoints_from_projection
-from hsdfmpm.utils import SerializableModel, DATA_PATH, autoversion, ImageData, ensure_path
+from hsdfmpm.utils import SerializableModel, DATA_PATH, ImageData, ensure_path
 
 # Make IRF dir
 IRF_PATH = DATA_PATH / "irf"
@@ -26,11 +26,13 @@ class LifetimeImage(ImageData):
 
     @model_validator(mode='after')
     def add_flim_metadata(self):
+        self.metadata = self.sdt_data[1]
         self.period = self.metadata['measurementInfo']['adc_re']
         self.bin_width = (
                 self.metadata['measurementInfo']['tac_r'] / self.metadata['measurementInfo']['tac_g'] / self.period
         )  # in ns
         self.omega = 2 * np.pi * self.harmonic * self.frequency  # in rad/s
+        self._active = self.decay
         return self
 
     @computed_field
@@ -42,16 +44,11 @@ class LifetimeImage(ImageData):
         return self._hyperstack, sdt_metadata
 
     @computed_field
-    @property
-    def metadata(self) -> dict:
-        """Get built-in SDT metadata"""
-        _, metadata = self.sdt_data
-        return metadata
-
-    @computed_field
     def decay(self) -> np.ndarray:
-        """Aliasing hyperstack for clarity with other resources."""
-        return self.hyperstack
+        """Aliasing for clarity with other resources."""
+        if self._active is None:
+            self._active = self.hyperstack
+        return self._active
 
     def load_irf(self,
                  irf: Optional[Union['InstrumentResponseFunction', str]] = None,
@@ -135,12 +132,33 @@ class LifetimeImage(ImageData):
         ax.legend()
         return ax
 
-@autoversion(major=1, minor=0)
+    def bin(self, bin_factor: int = 4):
+        bands, h, w, t = self._active.shape
+        h_binned, w_binned = h // bin_factor, w // bin_factor
+
+        # Crop to multiples of bin_factor along H and W only
+        cropped = self._active[:, :h_binned * bin_factor, :w_binned * bin_factor, :]
+
+        # Reshape → (C, H', f, W', f, T) so the two *f* axes can be averaged
+        reshaped = cropped.reshape(
+            bands,
+            h_binned, bin_factor,
+            w_binned, bin_factor,
+            t
+        )
+
+        # Average over the two binning axes (2 and 4)
+        self._active = reshaped.sum(axis=(2, 4))
+
 class InstrumentResponseFunction(LifetimeImage, SerializableModel):
     reference_lifetime: float
+    new_size: Optional[int] = None
 
     @model_validator(mode='after')
     def calculate_correction(self):
+        if self.new_size is not None:
+            self.resize_to(self.new_size)
+
         # Get raw coordinates
         g, s = self.phasor_coordinates(correction=False)
 
