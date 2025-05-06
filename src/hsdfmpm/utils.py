@@ -10,6 +10,9 @@ from urllib.parse import urlparse
 
 import cv2
 import numpy as np
+from matplotlib.colors import Colormap, Normalize
+from matplotlib import cm
+from matplotlib.colors import ListedColormap, Colormap, LinearSegmentedColormap
 from pydantic import BaseModel, Field, computed_field, AfterValidator, model_validator
 from tqdm.contrib import itertools
 
@@ -76,6 +79,60 @@ def apply_kernel_bank(src: np.ndarray[float], bank: np.ndarray[float]) -> np.nda
     return np.nanmax([
             cv2.filter2D(src, -1, k) for (k,) in itertools.product(bank)
         ], axis=0)
+
+
+def truncate_colormap(cmap: Optional[Union[Colormap, np.ndarray[float], str]] = None,
+                      cmin: float = 0, cmax: float = 1, n: int = 100):
+    cmap = get_cmap(cmap)
+    new_colors = cmap(np.linspace(cmin, cmax, n))
+    return LinearSegmentedColormap.from_list('truncated_cmap', new_colors, N=n)
+
+def get_cmap(cmap: Optional[Union[Colormap, np.ndarray[float], str]] = None):
+    if not isinstance(cmap, Colormap):
+        if isinstance(cmap, np.ndarray):
+            cmap = ListedColormap(cmap)
+        elif isinstance(cmap, str):
+            cmap = cm.get_cmap(cmap)
+        elif cmap is None:
+            cmap = cm.get_cmap('jet')
+        else:
+            raise TypeError(
+                f"cmap must be either a Colormap, str, or None to default to 'jet', but got type {type(cmap)}"
+            )
+    return cmap
+
+
+def colorize(var_map: np.ndarray[float],
+             intensity: Optional[np.ndarray[float]] = None,
+             cmap: Optional[Union[Colormap, np.ndarray]] = None,
+             cmin: float = 0.0,
+             cmax: float = 1.0,
+             n: int = 100,
+             intmin: float = 0.1,
+             intmax: float = 0.95) -> tuple[np.ndarray[float], Colormap]:
+
+    if intensity is None:
+        intensity = np.ones_like(var_map)
+
+    if cmap is None:
+        # Default cmap if none is input
+        cmap = truncate_colormap('jet', 0.13, 0.88, n)
+    else:
+        # Validate input
+        cmap = get_cmap(cmap)
+
+    # Map colors with normed space (cmin, cmax)
+    norm = Normalize(vmin=cmin, vmax=cmax, clip=True)
+    colorized = cmap(norm(var_map))[:, :, :3]
+
+    # Normalize intensity within limits
+    intmin = np.percentile(intensity, intmin * 100)
+    intmax = np.percentile(intensity, intmax * 100)
+    intensity = (intensity - intmin) / (intmax - intmin)
+    intensity[intensity < 0] = 0
+    intensity[intensity > 1] = 1
+
+    return colorized * intensity[..., np.newaxis], cmap
 
 # Define the class decorator
 def add_arithmetic_methods(cls):
@@ -184,7 +241,7 @@ class ImageData(BaseModel):
         return self._active.astype(dtype, copy=copy)
 
     def bin(self, bin_factor: int = 4):
-        bands, h, w = self._active.shape
+        bands, h, w = self.shape
         h_binned = h // bin_factor
         w_binned = w // bin_factor
 
@@ -201,11 +258,18 @@ class ImageData(BaseModel):
         # Average over binning axes
         self._active = cube_reshaped.mean(axis=(2, 4))
 
+    def resize_to(self, h: int):
+        self.bin(bin_factor=self.shape[1] // h)
+
     def apply_kernel_bank(self, kernel_bank: np.ndarray) -> np.ndarray:
         return apply_kernel_bank(self, kernel)
 
     def apply_mask(self, mask):
-        self._active[mask] = np.nan
+        self._active[:, ~mask.astype(bool)] = np.nan
+
+    def write(self, filename: str = 'processed.tiff', **kwargs):
+        filename = ensure_path(filename)
+        cv2.imwrite(str(filename), self._active, **kwargs)
 
 class SerializableModel(BaseModel):
     __version__ = "0.0.1"
