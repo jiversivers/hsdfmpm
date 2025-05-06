@@ -6,19 +6,20 @@ from typing import Optional, Union, Annotated
 
 import numpy as np
 import pandas as pd
-from matplotlib.colors import Colormap, Normalize
+from hsdfmpm.mpm.af.utils import find_dated_power_file
+from matplotlib.colors import Colormap
 from pydantic import model_validator, BaseModel, computed_field, AfterValidator
 
 
-from .utils import get_transfer_function, truncate_colormap, get_cmap
+from .utils import get_transfer_function
 from ..utils import read_xml, get_pvstate_values
-from ...utils import is_file, ImageData
+from ...utils import ImageData, ensure_path, colorize
 
 
 class AutofluorescenceImage(ImageData):
     metadata_ext: str = '.xml'
     image_ext: str = '.ome.tif'
-    power_file_path: Annotated[str, AfterValidator(is_file)]
+    power_file_path: Annotated[Union[str, Path], AfterValidator(ensure_path)]
 
     @model_validator(mode='after')
     def set_metadata_path(self):
@@ -31,24 +32,32 @@ class AutofluorescenceImage(ImageData):
 
         self.metadata_path = Path(self.metadata_path)
         self._active = self.hyperstack
-        return self
 
         # Load metadata into attributes
         root = read_xml(self.metadata_path)
         for val in root.iter('PVScan'):
             self.date = datetime.strptime(val.get('date'), "%m/%d/%Y %I:%M:%S %p")
         self.metadata = get_pvstate_values(root)
-        self.attenuation = float(self.metadata['laserPowerAttenuation']['elements']['IndexedValue'][0]['value'])
-        self.wavelength = float(self.metadata['laserWavelength']['elements']['IndexedValue'][0]['value'])
+        self.attenuation = float(self.metadata['laserPower']['elements']['IndexedValue'][0]['value'])
+        self.wavelength = int(self.metadata['laserWavelength']['elements']['IndexedValue'][0]['value'])
         self.laser = self.metadata['laserWavelength']['elements']['IndexedValue'][0]['description']
         self.gain = np.array([float(pmt['value']) for pmt in self.metadata['pmtGain']['elements']['IndexedValue']])
-        self.power = pd.read_excel(self.power_file_path)
+        if not self.power_file_path.is_file():
+            self.power_file_path = find_dated_power_file(self.date, self.power_file_path)
+        if self.power_file_path.suffix in ['.xlsx', '.xls']:
+            self.power = pd.read_excel(self.power_file_path)
+        elif self.power_file_path.suffix == '.csv':
+            self.power = pd.read_csv(self.power_file_path, dtype=float)
         return self
 
-    def normalize_to_fluorescein(self):
+    def normalize(self):
         # Get reference attenuation and measured power
         refAtt = self.power['Unnamed: 0'].values
-        refPwr = self.power[self.wavelength].values
+        if self.power_file_path.suffix == '.csv':
+            wl_key = str(self.wavelength)
+        else:
+            wl_key = self.wavelength
+        refPwr = self.power[wl_key].values
 
         # Fit a line to the measures
         design_matrix = np.column_stack((np.ones(len(refAtt)), refAtt))
@@ -58,13 +67,13 @@ class AutofluorescenceImage(ImageData):
         self.norm_pwr = m * self.attenuation + b
         transfer_function = get_transfer_function(self.date, self.laser)
         self._active = transfer_function(
-            img=self.hyperstack, pwr=self.norm_pwr, gain=self.gain
+            img=self.raw, pwr=self.norm_pwr, gain=self.gain, pmt=np.arange(self.shape[0])
         )
 
 class OpticalRedoxRatio(BaseModel):
-    ex755: Union[str, AutofluorescenceImage]
-    ex855: Union[str, AutofluorescenceImage]
-    power_file_path: Optional[str] = None
+    ex755: Union[str, Path, AutofluorescenceImage]
+    ex855: Union[str, Path, AutofluorescenceImage]
+    power_file_path: Optional[Union[str, Path]] = None
     mask: Optional[np.ndarray] = None
 
     class Config:
@@ -73,67 +82,37 @@ class OpticalRedoxRatio(BaseModel):
 
     @model_validator(mode='after')
     def load_images(self):
-        # Load power file if left implicit
-        if self.power_file_path is None:
-            try:
-                self.power_file_path = self.ex755.power_file_path
-            except AttributeError:
-                try:
-                    self.power_file_path = self.ex855.power_file_path
-                except AttributeError:
-                    try:
-                        self.power_file_path = list(Path(self.ex755.image_path).glob('*power*.xlsx'))[0]
-                    except IndexError:
-                        try:
-                            self.power_file_path = list(Path(self.ex855.image_path).glob('*power*.xlsx'))[0]
-                        except IndexError:
-                            try:
-                                self.power_file_path = list(Path(self.ex755).glob('*power*.xlsx'))[0]
-                            except IndexError:
-                                self.power_file_path = list(Path(self.ex855).glob('*power*.xlsx'))[0]
-            warnings.warn(f'Power file loaded implicitly from {self.power_file_path}.', Warning, stacklevel=2)
-
-        if isinstance(self.ex755, (str, Path)):
+        # Make sure power info is available
+        # If power is none, it has to be implemented in AF Images
+        if self.power_file_path is None and (isinstance(self.ex755, (str, Path)) or isinstance(self.ex855, (str, Path))):
+            raise ValueError("Must specify 'power_file_path' if both 'ex755' and 'ex855' are paths.")
+        # If AF images are just paths, power file must be loaded from here. AF Image check for date-implicit loading
+        elif isinstance(self.ex755, (str, Path)) or isinstance(self.ex855, (str, Path)):
             self.ex755 = AutofluorescenceImage(image_path=self.ex755, power_file_path=self.power_file_path)
-        if isinstance(self.ex855, (str, Path)):
             self.ex855 = AutofluorescenceImage(image_path=self.ex855, power_file_path=self.power_file_path)
-        self.ex855.normalize_to_fluorescein()
-        self.ex755.normalize_to_fluorescein()
+        # Normalize
+        self.ex855.normalize()
+        self.ex755.normalize()
         return self
 
     @computed_field
-    @cached_property
+    @property
+    def fad(self) -> np.ndarray:
+        return self.ex855[1]
+
+    @computed_field
+    @property
+    def nadh(self) -> np.ndarray:
+        return self.ex755[2]
+
+    @computed_field
+    @property
     def map(self) -> np.ndarray:
         return self.fad / (self.nadh + self.fad)
 
-    def colorize(self,
-                 cmap: Optional[Union[Colormap, np.ndarray]] = None,
-                 cmin: float = 0.0,
-                 cmax: float = 1.0,
-                 n: int = 100,
-                 intmin: float = 0.1,
-                 intmax: float = 0.95):
+    def colorize(self, **kwargs)-> tuple[np.ndarray[float], Colormap]:
         intensity = (self.fad + self.nadh) / 2
-
-        if cmap is None:
-            # Default cmap if none is input
-            cmap = truncate_colormap('jet', 0.13, 0.88, n)
-        else:
-            # Validate input
-            cmap = get_cmap(cmap)
-
-        # Map colors with normed space (cmin, cmax)
-        norm = Normalize(vmin=cmin, vmax=cmax, clip=True)
-        colored_orr = cmap(norm(self.map))[:, :, :3]
-
-        # Normalize intensity within limits
-        intmin = np.percentile(intensity, intmin * 100)
-        intmax = np.percentile(intensity, intmax * 100)
-        intensity = (intensity - intmin) / (intmax - intmin)
-        intensity[intensity < 0] = 0
-        intensity[intensity > 1] = 1
-
-        return colored_orr * intensity[..., np.newaxis], cmap
+        return colorize(self.map, intensity, **kwargs)
 
     @computed_field
     @property
@@ -144,3 +123,11 @@ class OpticalRedoxRatio(BaseModel):
     @property
     def fluorescence(self) -> np.float64:
         return np.average(self.fad) / (np.average(self.nadh) + np.average(self.fad))
+
+    def bin(self, **kwargs):
+        self.ex755.bin(**kwargs)
+        self.ex855.bin(**kwargs)
+
+    def resize_to(self, h: int):
+        self.ex755.resize_to(h)
+        self.ex855.resize_to(h)
