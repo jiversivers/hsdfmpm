@@ -1,6 +1,7 @@
 import warnings
+from itertools import product
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Callable
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -8,28 +9,40 @@ import seaborn as sns
 from pydantic import model_validator, computed_field
 from scipy.ndimage import median_filter
 
-from hsdfmpm.mpm.flim.utils import open_sdt_file_with_json_metadata, cartesian_from_polar, polar_from_cartesian, \
-    lifetime_from_cartesian, polar_from_lifetime, get_phasor_coordinates, find_intersection_with_circle, \
-    project_to_line, fit_phasor, get_endpoints_from_projection
+from hsdfmpm.mpm.flim.utils import (
+    open_sdt_file_with_json_metadata,
+    cartesian_from_polar,
+    polar_from_cartesian,
+    lifetime_from_cartesian,
+    polar_from_lifetime,
+    get_phasor_coordinates,
+    find_intersection_with_circle,
+    project_to_line,
+    fit_phasor,
+    get_endpoints_from_projection,
+)
 from hsdfmpm.utils import SerializableModel, DATA_PATH, ImageData, ensure_path
 
 # Make IRF dir
 IRF_PATH = DATA_PATH / "irf"
 IRF_PATH.mkdir(parents=True, exist_ok=True)
 
+
 class LifetimeImage(ImageData):
-    metadata_ext: str = '.xml'
-    image_ext: str = '.sdt'
-    calibration: Optional['InstrumentResponseFunction'] = None
+    metadata_ext: str = ".xml"
+    image_ext: str = ".sdt"
+    calibration: Optional["InstrumentResponseFunction"] = None
     frequency: float = 80e6
     harmonic: int = 1
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def add_flim_metadata(self):
         self.metadata = self.sdt_data[1]
-        self.period = self.metadata['measurementInfo']['adc_re']
+        self.period = self.metadata["measurementInfo"]["adc_re"]
         self.bin_width = (
-                self.metadata['measurementInfo']['tac_r'] / self.metadata['measurementInfo']['tac_g'] / self.period
+            self.metadata["measurementInfo"]["tac_r"]
+            / self.metadata["measurementInfo"]["tac_g"]
+            / self.period
         )  # in ns
         self.omega = 2 * np.pi * self.harmonic * self.frequency  # in rad/s
         self._active = self.decay
@@ -39,7 +52,7 @@ class LifetimeImage(ImageData):
     @property
     def sdt_data(self) -> tuple[np.ndarray, dict]:
         """Helper method to keep metadata and hyperstack DRY"""
-        filename = list(self.image_path.glob(f'*{self.image_ext}'))[0]
+        filename = list(self.image_path.glob(f"*{self.image_ext}"))[0]
         self._hyperstack, sdt_metadata = open_sdt_file_with_json_metadata(filename)
         return self._hyperstack, sdt_metadata
 
@@ -50,24 +63,53 @@ class LifetimeImage(ImageData):
             self._active = self.hyperstack
         return self._active
 
-    def load_irf(self,
-                 irf: Optional[Union['InstrumentResponseFunction', str]] = None,
-                 reference_lifetime: float = 0):
+    def load_irf(
+        self,
+        irf: Optional[Union["InstrumentResponseFunction", str]] = None,
+        reference_lifetime: float = 0,
+    ):
         # Load the IRF object
         self.calibration = get_irf(irf)
 
-    def phasor_coordinates(self,
-                           correction: bool = True,
-                           threshold: float = 0,
-                           median_filter_count: int = 0,
-                           k_size: Union[tuple[int, int], int] = (3, 3)
-                           ) -> np.ndarray:
+    def deconvolve(self):
+        deconvolved = np.zeros_like(self)
+        remainder = np.zeros_like(self)
+        for c, y, x in product(range(self.shape[0]), range(self.shape[1]), range(self.shape[1])):
+            recovered, rem = signal.deconvolve(self, self.irf)
+            deconvolved[c, y, x] = recovered
+            remainder[c, y, x] = rem
+        self.deconvolved = deconvolved
+        return remainder
 
-        g, s, photons = get_phasor_coordinates(self.decay,
-                                               bin_width=self.bin_width,
-                                               frequency=self.frequency,
-                                               harmonic=self.harmonic,
-                                               threshold=threshold)
+    def fit(
+        self,
+        model: Callable[[float, float, ...], np.ndarray[float]],
+        **kwargs) -> tuple[np.ndarray[float], np.ndarray[float]]:
+        if not hasattr(self, 'deconvolved'):
+            self.deconvolve()
+        _active = self._active.copy()
+        out_image = np.zeros(self.shape[:-1])
+        red_chi_sq = np.zeros(self.shape[:-1])
+        for i, ch in enumerate(_active):
+            self._active = ch.permute(2, 0, 1)  # Move time axis to front
+            out_image[i], red_chi_sq[i] = super().fit(model, **kwargs)
+        return out_image, red_chi_sq
+
+    def phasor_coordinates(
+        self,
+        correction: bool = True,
+        threshold: float = 0,
+        median_filter_count: int = 0,
+        k_size: Union[tuple[int, int], int] = (3, 3),
+    ) -> np.ndarray:
+
+        g, s, photons = get_phasor_coordinates(
+            self.decay,
+            bin_width=self.bin_width,
+            frequency=self.frequency,
+            harmonic=self.harmonic,
+            threshold=threshold,
+        )
 
         # Convert to polar coordinates
         phase, modulation = polar_from_cartesian(g, s)
@@ -94,7 +136,7 @@ class LifetimeImage(ImageData):
         # Tau_phi: Phi-based lifetime, Tau_m: Modulation based lifetime
         with np.errstate(divide="ignore", invalid="ignore"):
             self.tau_phi = (1 / self.omega) * np.tan(phase)
-            self.tau_m = (1 / self.omega) * np.sqrt((modulation ** -2) - 1)
+            self.tau_m = (1 / self.omega) * np.sqrt((modulation**-2) - 1)
 
         return g, s
 
@@ -119,16 +161,20 @@ class LifetimeImage(ImageData):
 
         return self.alphas, self.tau_m, tau
 
-    def phasor_plot(self, circ: bool = True, ax: Optional[plt.Axes] = None, **kwargs) -> plt.Axes:
+    def phasor_plot(
+        self, circ: bool = True, ax: Optional[plt.Axes] = None, **kwargs
+    ) -> plt.Axes:
         g, s = self.phasor_coordinates(**kwargs)
         for ch, (g_ch, s_ch) in enumerate(zip(g, s)):
             x, y = g_ch.flatten(), s_ch.flatten()
-            sns.scatterplot(x=x, y=y, s=1, color='.15', label=f'Phasor Coordinates, CH: {ch}')
-            sns.histplot(x=x, y=y, bins=50, pthresh=.1, cmap="mako")
+            sns.scatterplot(
+                x=x, y=y, s=1, color=".15", label=f"Phasor Coordinates, CH: {ch}"
+            )
+            sns.histplot(x=x, y=y, bins=50, pthresh=0.1, cmap="mako")
             sns.kdeplot(x=x, y=y, levels=5, color="w", linewidths=1)
 
         ax = ax if ax is not None else plt.gca()
-        ax.set(xlim=(0, 1), ylim=(0, 0.7), xlabel='G', ylabel='S')
+        ax.set(xlim=(0, 1), ylim=(0, 0.7), xlabel="G", ylabel="S")
         ax.legend()
         return ax
 
@@ -137,24 +183,20 @@ class LifetimeImage(ImageData):
         h_binned, w_binned = h // bin_factor, w // bin_factor
 
         # Crop to multiples of bin_factor along H and W only
-        cropped = self._active[:, :h_binned * bin_factor, :w_binned * bin_factor, :]
+        cropped = self._active[:, : h_binned * bin_factor, : w_binned * bin_factor, :]
 
         # Reshape → (C, H', f, W', f, T) so the two *f* axes can be averaged
-        reshaped = cropped.reshape(
-            bands,
-            h_binned, bin_factor,
-            w_binned, bin_factor,
-            t
-        )
+        reshaped = cropped.reshape(bands, h_binned, bin_factor, w_binned, bin_factor, t)
 
         # Average over the two binning axes (2 and 4)
         self._active = reshaped.sum(axis=(2, 4))
+
 
 class InstrumentResponseFunction(LifetimeImage, SerializableModel):
     reference_lifetime: float
     new_size: Optional[int] = None
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def calculate_correction(self):
         if self.new_size is not None:
             self.resize_to(self.new_size)
@@ -166,7 +208,9 @@ class InstrumentResponseFunction(LifetimeImage, SerializableModel):
         phase, modulation = polar_from_cartesian(g, s)
 
         # Get references
-        self.reference_phase, self.reference_modulation = polar_from_lifetime(self.reference_lifetime, self.omega)
+        self.reference_phase, self.reference_modulation = polar_from_lifetime(
+            self.reference_lifetime, self.omega
+        )
 
         # Calculate correction factors
         self.phase_offset = self.reference_phase - phase
@@ -177,15 +221,17 @@ class InstrumentResponseFunction(LifetimeImage, SerializableModel):
         if path is None:
             path = IRF_PATH
         if path.is_dir():
-            self.save_pickle(path / f'irf.pkl')
+            self.save_pickle(path / f"irf.pkl")
         else:
             self.save_pickle(path)
 
     @classmethod
-    def load(cls,
-             path: Optional[Union[Path, str]] = None,
-             reference_lifetime: Optional[float] = None,
-             **kwargs) -> 'InstrumentResponseFunction':
+    def load(
+        cls,
+        path: Optional[Union[Path, str]] = None,
+        reference_lifetime: Optional[float] = None,
+        **kwargs,
+    ) -> "InstrumentResponseFunction":
         if path is None:
             irf = get_irf(path)
             return irf
@@ -194,19 +240,22 @@ class InstrumentResponseFunction(LifetimeImage, SerializableModel):
 
             # Load (extension-based method)
             ext = path.suffix.lower()
-            if ext == '.sdt':
+            if ext == ".sdt":
                 image_ext = path.name
                 path = path.parent
-                return InstrumentResponseFunction(image_path=path,
-                                                  image_ext=image_ext,
-                                                  reference_lifetime=reference_lifetime,
-                                                  **kwargs)
-            if ext == '.pkl':
+                return InstrumentResponseFunction(
+                    image_path=path,
+                    image_ext=image_ext,
+                    reference_lifetime=reference_lifetime,
+                    **kwargs,
+                )
+            if ext == ".pkl":
                 if reference_lifetime is not None:
                     warnings.warn(
-                        'Reference lifetime is not used when .pkl is loaded. '
-                        'To update IRF reference lifetime, reload the .sdt file with new reference and <obj>.store again.',
-                        Warning, stacklevel=2
+                        "Reference lifetime is not used when .pkl is loaded. "
+                        "To update IRF reference lifetime, reload the .sdt file with new reference and <obj>.store again.",
+                        Warning,
+                        stacklevel=2,
                     )
                 return cls.load_pickle(path)
 
@@ -214,8 +263,8 @@ class InstrumentResponseFunction(LifetimeImage, SerializableModel):
 # TODO: Add a user input pop up to get the reference lifetime if a LifetimeImage is input
 # TODO: Add file chooser for IRF files in datapath when more than one is present.
 def get_irf(
-        irf: Optional[Union['InstrumentResponseFunction', str]] = None
-) -> 'InstrumentResponseFunction':
+    irf: Optional[Union["InstrumentResponseFunction", str]] = None,
+) -> "InstrumentResponseFunction":
     """
     This is a helper function to parse the input IRF as either a file, a preloaded InstrumentResponseFunction, or None.
     In the case of None, the default path is from in .hsdfm package path. This is searched and the most recent IRF
@@ -237,19 +286,19 @@ def get_irf(
 
     # Search data path if no path input
     if irf is None:
-        file = list(IRF_PATH.glob(f'irf.pkl'))[-1]
+        file = list(IRF_PATH.glob(f"irf.pkl"))[-1]
         warnings.warn(f"Loading default IRF file, '{file}'.", Warning, stacklevel=2)
     # Look for pickles if dir given
     else:
         irf = Path(irf)
         if irf.is_dir():
-            file = list(irf.glob('irf.pkl'))[-1]
+            file = list(irf.glob("irf.pkl"))[-1]
         else:
             file = irf
 
     # Check for file existence
     if not file:
-        raise FileNotFoundError(f'No IRF file found at {irf}.')
+        raise FileNotFoundError(f"No IRF file found at {irf}.")
 
     irf = InstrumentResponseFunction.load(path=file)
 
