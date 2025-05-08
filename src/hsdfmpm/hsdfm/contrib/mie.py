@@ -6,22 +6,22 @@ from scipy.special import spherical_jn, spherical_yn
 
 def mie_scattering_coefficients(m: complex, x: float) -> np.ndarray:
     """
-      Compute the Mie scattering coefficients aₙ, bₙ, cₙ, and dₙ for a homogeneous sphere.
+    Compute the Mie scattering coefficients aₙ, bₙ, cₙ, and dₙ for a homogeneous sphere.
 
-      This implements C. Mätzler’s June 2002 routine based on Bohren & Huffman (1983, pp. 100, 477).
+    This implements C. Mätzler’s June 2002 routine based on Bohren & Huffman (1983, pp. 100, 477).
 
-      :param m: Complex refractive index of the sphere (m = m′ + i m″).
-      :type m: complex
-      :param x: Size parameter x = k₀·a, where k₀ is the wave number in the ambient medium
-                and a is the sphere radius.
-      :type x: float
-      :returns: 2D array of shape (4, nmax) containing the Mie coefficients for orders n = 1…nmax.
-                - Row 0: aₙ
-                - Row 1: bₙ
-                - Row 2: cₙ
-                - Row 3: dₙ
-      :rtype: numpy.ndarray
-      """
+    :param m: Complex refractive index of the sphere (m = m′ + i m″).
+    :type m: complex
+    :param x: Size parameter x = k₀·a, where k₀ is the wave number in the ambient medium
+              and a is the sphere radius.
+    :type x: float
+    :returns: 2D array of shape (4, nmax) containing the Mie coefficients for orders n = 1…nmax.
+              - Row 0: aₙ
+              - Row 1: bₙ
+              - Row 2: cₙ
+              - Row 3: dₙ
+    :rtype: numpy.ndarray
+    """
     # determine highest order
     nmax = int(np.round(2 + x + 4 * x ** (1 / 3)))
     n = np.arange(1, nmax + 1)
@@ -59,7 +59,8 @@ def mie_scattering_coefficients(m: complex, x: float) -> np.ndarray:
     # stack into a single (4, nmax) array
     return np.vstack((an, bn, cn, dn))
 
-def mie_efficiency(m: complex, x:float) -> np.ndarray:
+
+def mie_efficiency(m: complex, x: float) -> np.ndarray:
     """
     Compute Mie efficiencies for extinction, scattering, absorption, backscattering,
     the asymmetry parameter, and the backscatter ratio for a homogeneous sphere,
@@ -72,15 +73,15 @@ def mie_efficiency(m: complex, x:float) -> np.ndarray:
     :type x: float
     :returns: 1D array with the following entries:
 
-        0. Real part of *m*  
-        1. Imaginary part of *m*  
-        2. Size parameter *x*  
-        3. Q<sub>ext</sub> (extinction efficiency)  
-        4. Q<sub>sca</sub> (scattering efficiency)  
-        5. Q<sub>abs</sub> (absorption efficiency)  
-        6. Q<sub>back</sub> (backscattering efficiency)  
-        7. Asymmetry parameter ⟨cos θ⟩  
-        8. Backscatter ratio Q<sub>back</sub> / Q<sub>sca</sub>  
+        0. Real part of *m*
+        1. Imaginary part of *m*
+        2. Size parameter *x*
+        3. Q<sub>ext</sub> (extinction efficiency)
+        4. Q<sub>sca</sub> (scattering efficiency)
+        5. Q<sub>abs</sub> (absorption efficiency)
+        6. Q<sub>back</sub> (backscattering efficiency)
+        7. Asymmetry parameter ⟨cos θ⟩
+        8. Backscatter ratio Q<sub>back</sub> / Q<sub>sca</sub>
     :rtype: numpy.ndarray of shape (9,)
     """
     # Handle singular case at x == 0
@@ -116,7 +117,7 @@ def mie_efficiency(m: complex, x:float) -> np.ndarray:
     qext = 2 * q / x2
 
     # Scattering efficiency Q_sca
-    en = cn * (anp ** 2 + anpp ** 2 + bnp ** 2 + bnpp ** 2)
+    en = cn * (anp**2 + anpp**2 + bnp**2 + bnpp**2)
     q = np.sum(en)
     qsca = 2 * q / x2
 
@@ -140,10 +141,9 @@ def mie_efficiency(m: complex, x:float) -> np.ndarray:
 
     return np.array([m.real, m.imag, x, qext, qsca, qabs, qb, asy, qratio])
 
+
 def mie_scatter_and_anisotropy(
-        wavelengths: np.ndarray[float],
-        r: float,
-        sphere_type: str
+    wavelengths: np.ndarray[float], r: float, sphere_type: str
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Calculate Mie scattering efficiencies and anisotropy versus wavelength.
@@ -157,12 +157,12 @@ def mie_scatter_and_anisotropy(
     :returns: Tuple of four 1D arrays, each of length N = ⌊(l_max−l_min)/dl⌋+1:
 
         - **wavelengths**: Wavelengths (nm).
-        - **Qsca**: Total scattering efficiency (1/μm³).  
-        - **Qback**: Backscattering efficiency (1/μm³).  
-        - **g**: Anisotropy parameter ⟨cos θ⟩.  
+        - **Qsca**: Total scattering efficiency (1/μm³).
+        - **Qback**: Backscattering efficiency (1/μm³).
+        - **g**: Anisotropy parameter ⟨cos θ⟩.
     :rtype: tuple(numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray)
     """
-    wavelengths = wavelengths.copy() * 1e-3 # nm -> um
+    wavelengths = wavelengths.copy() * 1e-3  # nm -> um
     N = wavelengths.size
 
     Qsca = np.zeros(N, dtype=float)
@@ -171,14 +171,14 @@ def mie_scatter_and_anisotropy(
 
     for i, lam in enumerate(wavelengths):
         lt = sphere_type.lower()
-        if lt == 'tissue':
+        if lt == "tissue":
             n_sph = 1.424
             n_med = 1.36
             m = n_sph / n_med
-        elif lt in ('beads', 'bead'):
+        elif lt in ("beads", "bead"):
             n_sph = 1.5663
             n_med = 1.33
-            m = (n_sph + 0.00785 / lam ** 2 + 0.000334 / lam ** 4) / n_med
+            m = (n_sph + 0.00785 / lam**2 + 0.000334 / lam**4) / n_med
         else:
             raise ValueError(f"Unknown sphere_type '{sphere_type}'")
 
@@ -186,7 +186,7 @@ def mie_scatter_and_anisotropy(
         x = r * k
 
         #  mie_efficiency returns [Re(m), Im(m), x, Qext, Qsca, Qabs, Qback, g, Qratio]
-        F =  mie_efficiency(m, x)
+        F = mie_efficiency(m, x)
 
         Qsca[i] = F[4].real
         Qback[i] = F[6].real
@@ -196,12 +196,12 @@ def mie_scatter_and_anisotropy(
 
 
 def compute_volume_distribution_by_scattering(
-        redscat_coef_mm_inv: np.ndarray,
-        red_scat_curve: np.ndarray,
-        tot_vol_ml: float,
-        per_sol_percent: float,
-        act_bead_diameter_um: float,
-        ref_wavelength_idx: int = 22
+    redscat_coef_mm_inv: np.ndarray,
+    red_scat_curve: np.ndarray,
+    tot_vol_ml: float,
+    per_sol_percent: float,
+    act_bead_diameter_um: float,
+    ref_wavelength_idx: int = 22,
 ) -> np.ndarray:
     """
     Compute the bead‐and‐water volumes (in μL) required to achieve specified
@@ -234,7 +234,9 @@ def compute_volume_distribution_by_scattering(
     part_beads = tot_vol_ml * density * 1e12
 
     # 3) Total number of beads per mL of bead solution
-    tot_beads = (6 * (per_sol_percent / 100.0) * 1e12) / (1.05 * np.pi * act_bead_diameter_um ** 3)
+    tot_beads = (6 * (per_sol_percent / 100.0) * 1e12) / (
+        1.05 * np.pi * act_bead_diameter_um**3
+    )
 
     # 4) Bead solution volume needed (μL)
     beads_volume_ul = (part_beads / tot_beads) * 1000.0
@@ -243,22 +245,20 @@ def compute_volume_distribution_by_scattering(
     water_volume_ul = tot_vol_ml * 1000.0 - beads_volume_ul
 
     # 6) Stack into (beads, water, total) columns
-    volume_dist_ul = np.column_stack((
-        beads_volume_ul,
-        water_volume_ul,
-        beads_volume_ul + water_volume_ul
-    ))
+    volume_dist_ul = np.column_stack(
+        (beads_volume_ul, water_volume_ul, beads_volume_ul + water_volume_ul)
+    )
 
     return volume_dist_ul
 
 
 def compute_volume_distribution_by_bead_number(
-        bead_volume_ul: np.ndarray,
-        tot_vol_ml: float,
-        per_sol_percent: float,
-        act_bead_diameter_um: float,
-        red_scat_curve: np.ndarray,
-        ref_wavelength_idx: int = 22
+    bead_volume_ul: np.ndarray,
+    tot_vol_ml: float,
+    per_sol_percent: float,
+    act_bead_diameter_um: float,
+    red_scat_curve: np.ndarray,
+    ref_wavelength_idx: int = 22,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute the updated reduced scattering coefficient and the bead‐and‐water
@@ -285,7 +285,9 @@ def compute_volume_distribution_by_bead_number(
     :rtype: tuple(numpy.ndarray, numpy.ndarray)
     """
     # 1) Total beads per mL of bead solution
-    tot_beads = (6 * (per_sol_percent / 100.0) * 1e12) / (1.05 * np.pi * act_bead_diameter_um ** 3)
+    tot_beads = (6 * (per_sol_percent / 100.0) * 1e12) / (
+        1.05 * np.pi * act_bead_diameter_um**3
+    )
 
     # 2) Water volume to reach total (μL)
     water_volume_ul = tot_vol_ml * 1000.0 - bead_volume_ul
@@ -300,26 +302,24 @@ def compute_volume_distribution_by_bead_number(
     updated_redscat_coef_mm_inv = density * red_scat_curve[ref_wavelength_idx] * 1000.0
 
     # 6) Stack volumes
-    volume_dist_ul = np.column_stack((
-        bead_volume_ul,
-        water_volume_ul,
-        bead_volume_ul + water_volume_ul
-    ))
+    volume_dist_ul = np.column_stack(
+        (bead_volume_ul, water_volume_ul, bead_volume_ul + water_volume_ul)
+    )
 
     return volume_dist_ul, updated_redscat_coef_mm_inv
 
 
 def generate_phantom_profiles(
-        *,
-        wavelengths: np.ndarray[float],
-        bead_radius_um: float,
-        sphere_type: str,
-        tot_vol_ml: float,
-        per_sol_percent: float,
-        mode: str = "both",
-        red_scat_coef: np.ndarray = None,
-        bead_volumes_ul: np.ndarray = None,
-        ref_wavelength: float = 630,
+    *,
+    wavelengths: np.ndarray[float],
+    bead_radius_um: float,
+    sphere_type: str,
+    tot_vol_ml: float,
+    per_sol_percent: float,
+    mode: str = "both",
+    red_scat_coef: np.ndarray = None,
+    bead_volumes_ul: np.ndarray = None,
+    ref_wavelength: float = 630,
 ) -> dict:
     """
     Compute bead volumes and reduced‑scattering profiles for phantom preparation.
@@ -376,10 +376,9 @@ def generate_phantom_profiles(
 
     # --- 1) get the red‑scattering cross‑section curve per sphere ---
     wavelengths_um, Qsca, Qback, g = mie_scatter_and_anisotropy(
-        wavelengths=wavelengths,
-        r=bead_radius_um, sphere_type=sphere_type
+        wavelengths=wavelengths, r=bead_radius_um, sphere_type=sphere_type
     )
-    sigma_scat_um2 = Qsca * np.pi * bead_radius_um ** 2 * (1.0 - g)
+    sigma_scat_um2 = Qsca * np.pi * bead_radius_um**2 * (1.0 - g)
 
     # --- 2a) scattering mode: target μₛ′ → bead volumes ---
     if mode in ("scattering", "both"):
@@ -395,18 +394,16 @@ def generate_phantom_profiles(
         )
         bead_ul = vol_dist[:, 0]  # first column = bead volumes
         out["bead_volumes_ul_scatter"] = bead_ul
-        out["volume_distribution_scatter_ul"] = vol_dist.squeeze()[:-1] if extended else vol_dist.squeeze()
+        out["volume_distribution_scatter_ul"] = (
+            vol_dist.squeeze()[:-1] if extended else vol_dist.squeeze()
+        )
 
     # --- 2b) bead mode: bead volumes → resulting μₛ′ ---
     if mode in ("beads", "both"):
         if mode == "beads" and bead_volumes_ul is None:
             raise ValueError("need bead_volumes_ul for bead mode")
         # if 'both', override the passed‑in bead_volumes with the scatter‑computed ones
-        bv = (
-            bead_volumes_ul
-            if mode == "beads"
-            else out["bead_volumes_ul_scatter"]
-        )
+        bv = bead_volumes_ul if mode == "beads" else out["bead_volumes_ul_scatter"]
         vol_dist_b, mu_mm = compute_volume_distribution_by_bead_number(
             bead_volume_ul=bv,
             tot_vol_ml=tot_vol_ml,
@@ -415,7 +412,9 @@ def generate_phantom_profiles(
             red_scat_curve=sigma_scat_um2,
             ref_wavelength_idx=idx,
         )
-        out["volume_distribution_bead_ul"] = vol_dist_b.squeeze()[:-1] if extended else vol_dist_b.squeeze()
+        out["volume_distribution_bead_ul"] = (
+            vol_dist_b.squeeze()[:-1] if extended else vol_dist_b.squeeze()
+        )
 
     # --- 3) build full μₛ′(λ) in cm⁻¹ curves for each phantom ---
     # density = μₛ′(mm⁻¹)/(σ_scat_um2[idx]*1e3) ;  factor = 1e4 (scattering mode)
@@ -423,16 +422,24 @@ def generate_phantom_profiles(
     if mode in ("scattering", "both"):
         density_sc = red_scat_coef / (sigma_scat_um2[idx] * 1e3)
         factor_sc = 1e4
-        musp_profiles_cm_inv_scatter = np.array([sigma_scat_um2 * d * factor_sc for d in np.atleast_1d(density_sc)]).squeeze()
-        out["musp_profiles_cm_inv_scatter"] = musp_profiles_cm_inv_scatter[:-1] if extended else musp_profiles_cm_inv_scatter
+        musp_profiles_cm_inv_scatter = np.array(
+            [sigma_scat_um2 * d * factor_sc for d in np.atleast_1d(density_sc)]
+        ).squeeze()
+        out["musp_profiles_cm_inv_scatter"] = (
+            musp_profiles_cm_inv_scatter[:-1]
+            if extended
+            else musp_profiles_cm_inv_scatter
+        )
     if mode in ("beads", "both"):
         # extract densities from mu_mm:  mu_mm = density * σ_scat_um2[idx] *1000
         dens_b = np.array(mu_mm) / (sigma_scat_um2[idx] * 1e3)
         factor_b = 10
-        musp_profiles_cm_inv_beads = np.array([sigma_scat_um2 * d * factor_b for d in dens_b]).squeeze()
-        out["musp_profiles_cm_inv_beads"] = musp_profiles_cm_inv_beads[:-1] if extended else musp_profiles_cm_inv_beads
-
+        musp_profiles_cm_inv_beads = np.array(
+            [sigma_scat_um2 * d * factor_b for d in dens_b]
+        ).squeeze()
+        out["musp_profiles_cm_inv_beads"] = (
+            musp_profiles_cm_inv_beads[:-1] if extended else musp_profiles_cm_inv_beads
+        )
 
     out["wavelengths_nm"] = wavelengths_um[:-1] if extended else wavelengths_um
     return out
-

@@ -8,25 +8,39 @@ import numpy as np
 from ..utils import LaserFlag, TRANSFER_FUNCTION_DATA
 from ...utils import iterable_array, ensure_path
 
+
 def get_transfer_function(
-        date: datetime, laser_flag: Union[str, LaserFlag]
-) -> Callable[[np.ndarray, float, Union[float, list[float]], Union[int, list[int]] | None], np.ndarray]:
+    date: datetime, laser_flag: Union[str, LaserFlag]
+) -> Callable[
+    [np.ndarray, float, Union[float, list[float]], Union[int, list[int]] | None],
+    np.ndarray,
+]:
     # Get the laser input
     laser_flag = LaserFlag[laser_flag]
 
     # Filter rows based on the date and laserFlag
-    valid_rows = TRANSFER_FUNCTION_DATA[(TRANSFER_FUNCTION_DATA['startDate'] <= date) & ~(TRANSFER_FUNCTION_DATA['endDate'] < date) & (TRANSFER_FUNCTION_DATA['laserFlag'] == laser_flag.value)]
+    valid_rows = TRANSFER_FUNCTION_DATA[
+        (TRANSFER_FUNCTION_DATA["startDate"] <= date)
+        & ~(TRANSFER_FUNCTION_DATA["endDate"] < date)
+        & (TRANSFER_FUNCTION_DATA["laserFlag"] == laser_flag.value)
+    ]
 
     if not valid_rows.empty:
         # Get the last (mot recent) valid row (should be only one anyway)
         row = valid_rows.iloc[-1]
-        offsets = np.array([val for key, val in row.items() if 'offset' in key])
-        params = np.array([val for key, val in row.items() if 'param' in key])
+        offsets = np.array([val for key, val in row.items() if "offset" in key])
+        params = np.array([val for key, val in row.items() if "param" in key])
     else:
-        raise ValueError("Error: Could not get correct date or laserFlag. Please refer to the documentation.")
+        raise ValueError(
+            "Error: Could not get correct date or laserFlag. Please refer to the documentation."
+        )
 
-    def transfer(img: np.ndarray, pwr: float, gain: Union[float, list[float]],
-                 pmt: Optional[Union[int, list[int]]] = None) -> np.ndarray:
+    def transfer(
+        img: np.ndarray,
+        pwr: float,
+        gain: Union[float, list[float]],
+        pmt: Optional[Union[int, list[int]]] = None,
+    ) -> np.ndarray:
         """
         This function applies the appropriate adjustments to an input image of either 1 channel (shape: H x W). In this
          mode, a specific Index must be specified to tell the function which PMT offset to use. Alternatively, the image
@@ -56,24 +70,31 @@ def get_transfer_function(
 
         # Check the size/pmt-index/gain match (see docstring)
         if img.shape[0] == 1 and pmt is None or img.shape[0] != len(offset):
-            raise RuntimeError(f'No PMT index given for image with {img.shape[0]} channels.')
+            raise RuntimeError(
+                f"No PMT index given for image with {img.shape[0]} channels."
+            )
         if len(gain) != img.shape[0]:
-            raise RuntimeError(f'Ambiguous PMT gain list if length {len(gain)} for image with {img.shape[0]} channels.')
+            raise RuntimeError(
+                f"Ambiguous PMT gain list if length {len(gain)} for image with {img.shape[0]} channels."
+            )
 
         # Calculate transfer function
         g = params[0] * gain ** params[1]
 
-        img = ((img - offset) / (pwr ** 2)) / g
+        img = ((img - offset) / (pwr**2)) / g
 
         return img
 
     return transfer
 
+
 def find_dated_power_file(date: str | datetime, power_directory: str | Path) -> Path:
     if isinstance(date, datetime):
-        date = datetime.strftime(date, '%m%d%Y')
+        date = datetime.strftime(date, "%m%d%Y")
     power_directory = ensure_path(power_directory)
-    power_files = sorted(power_directory.glob(f'*{date}*.xls*')) + sorted(power_directory.glob(f'*{date}*.csv'))
+    power_files = sorted(power_directory.glob(f"*{date}*.xls*")) + sorted(
+        power_directory.glob(f"*{date}*.csv")
+    )
     if not power_files:
         raise FileNotFoundError(f"No power file found for date {date}.")
     return power_files[0]
