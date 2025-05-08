@@ -51,17 +51,19 @@ class TestFitFunctions(unittest.TestCase):
         self.assertEqual(i, 18)
 
     def test_fit_voxel(self):
-        params = fit_voxel(
+        params, score = fit_voxel(
             voxel = self.y,
             model = self.model,
             x0 = [0, 0, 0],
             loss_thresh=1e-3)
         npt.assert_allclose(params, self.params, rtol=1e-7, atol=1e-9)
+        chi_sq = (1 / (N_WAVEL - N_PARAM)) * np.sum(((self.y - self.model(*params)) ** 2 / (np.var(self.y))))
+        self.assertEqual(score, chi_sq)
 
     def test_fit_volume(self):
         volume = np.column_stack([self.y, self.y])
         volume = np.stack([volume, volume], axis=-1)
-        params = fit_volume(
+        params, score = fit_volume(
             volume = volume,
             model = self.model,
             n_workers = 2,
