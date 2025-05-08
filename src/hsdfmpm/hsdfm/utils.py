@@ -257,7 +257,7 @@ def gabor_filter_bank(
     return kernels
 
 
-def leastsq_reflectance(
+def naive_leastsq_reflectance(
     hyperstack: np.ndarray[float], eps: np.ndarray[float]
 ) -> tuple[np.ndarray[float], np.ndarray[float]]:
 
