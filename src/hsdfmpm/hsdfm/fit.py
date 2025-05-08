@@ -1,6 +1,7 @@
 import numpy as np
 import multiprocessing as mp
 from itertools import product
+from tqdm import tqdm
 from functools import partial
 
 from scipy.optimize import least_squares
@@ -76,6 +77,10 @@ def fit_voxel(
 
     residual_function = make_residual(voxel=voxel, model=model, loss_thresh=loss_thresh, score_function=score_function)
     jacobian_function = make_jacobian(voxel=voxel, model=model, eps=eps)
+    if loss_thresh is not None and loss_thresh > 0:
+        kwargs['gtol'] = 1e-15
+        kwargs['xtol'] = 1e-15
+        kwargs['ftol'] = 1e-15
     try:
         _ = least_squares(residual_function, x0, jac=jacobian_function, **kwargs)
     except LossIsGoodEnough as exc:
@@ -117,11 +122,11 @@ def fit_volume(
     score_image = np.zeros(volume.shape[1:], dtype=np.float32)
     voxel_mapper = partial(make_voxel_mapper, x0=x0, **kwargs)
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        for y, x, (params, score) in executor.map(
+        for y, x, (params, score) in tqdm(executor.map(
             voxel_mapper,  # -> y, x, (params, score)
             volume_iter(volume),
             chunksize=int(chunksize),
-        ):
+        )):
             param_image[:, y, x] = params
             score_image[x, y] = score
 
