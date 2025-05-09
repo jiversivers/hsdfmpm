@@ -16,9 +16,11 @@ class TestHyperspectralImage(unittest.TestCase):
 
         # Mocking normalization arrays
         self.std_arr = np.array([[[2, 1], [1, 2]],
-                                 [[3, 4], [4, 3]]], dtype=np.float64)
+                                 [[3, 4], [4, 3]],
+                                 [[5, 6], [6, 5]]], dtype=np.float64)
         self.bg_arr = np.array([[[0.5, 1.5], [1.5, 0.5]],
-                                [[0.0, 0.5], [0.5, 0.0]]], dtype=np.float64)
+                                [[0.0, 0.5], [0.5, 0.0]],
+                                [[0.0, 1.5], [1.5, 0.0]]], dtype=np.float64)
 
         # Create mock standards (in context to skip validation)
         with patch('hsdfmpm.hsdfm.hsdfm.read_metadata_json', return_value=self.md_vals):
@@ -56,7 +58,7 @@ class TestHyperspectralImage(unittest.TestCase):
 
         # With array scalar
         self.assertEqual(self.hsi_with_array_scalar.metadata['ExpTime'], self.md_vals['ExpTime'])
-        npt.assert_array_equal(self.hsi_with_array_scalar._hyperstack, self.scalar)
+        npt.assert_array_equal(self.hsi_with_array_scalar._hyperstack, self.hs_vals / (self.hs_vals / self.scalar))
         npt.assert_array_equal(self.hsi_with_array_scalar._active, self.hsi_with_array_scalar._hyperstack)
 
     def test_normalize_integration_time(self):
@@ -109,6 +111,12 @@ class TestHyperspectralImage(unittest.TestCase):
     def test_bin(self):
         self.hsi.bin(bin_factor=2)
         npt.assert_array_equal(self.hsi, self.hs_vals.mean(axis=(1,2), keepdims=True))
+
+    def test_subset_by_metadata(self):
+        self.hsi.subset_by_metadata('Wavelength', np.arange(500, 520, 10))
+        self.assertEqual(len(self.hsi), 2)
+        npt.assert_array_equal(self.hsi.image, self.hs_vals[np.isin(self.md_vals['Wavelength'], np.arange(500, 520, 10))])
+
 
     # TODO: Test apply kernel bank
     # TODO: Test apply mask
