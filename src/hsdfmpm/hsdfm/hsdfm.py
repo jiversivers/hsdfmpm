@@ -1,9 +1,6 @@
-from functools import cache
-from typing import Optional
+from typing import Optional, Callable
 
 from pydantic import model_validator, BaseModel, SkipValidation
-from tqdm.contrib import itertools
-import scipy.optimize as opt
 
 from .utils import *
 from ..utils import ImageData, read_hyperstack, add_arithmetic_methods
@@ -81,6 +78,11 @@ class HyperspectralImage(ImageData):
             if wl == wavelength:
                 return self[self.metadata["Wavelength"].index(wl)]
 
+    def subset_by_metadata(self, key, selection_array):
+        mask = np.isin(self.metadata[key], selection_array)
+        indices = np.arange(0, len(self) + 1, 1)[mask]
+        self.subset(indices)
+
     def fit(
         self,
         model: Callable[[float, float, ...], np.ndarray[float]],
@@ -151,9 +153,6 @@ class MergedHyperspectralImage(BaseModel):
                 return np.nanmean(out, axis=0)
             except TypeError:
                 return out
-
-    def __array__(self):
-        return self._active
 
     def __getitem__(self, item):
         return self.listed_hyperstack[item]
