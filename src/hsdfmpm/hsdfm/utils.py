@@ -5,14 +5,12 @@ from pathlib import Path
 import numpy as np
 
 from numpy.lib._stride_tricks_impl import as_strided
-from photon_canon.lut import LUT
 from skimage.filters import gabor_kernel
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 
-from enum import Enum
-from typing import Callable, Union
+from typing import Union
 
 from ..utils import vectorize_img, ensure_path, iterable_array
 
