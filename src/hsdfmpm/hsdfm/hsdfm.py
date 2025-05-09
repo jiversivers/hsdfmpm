@@ -80,7 +80,7 @@ class HyperspectralImage(ImageData):
 
     def subset_by_metadata(self, key, selection_array):
         mask = np.isin(self.metadata[key], selection_array)
-        indices = np.arange(0, len(self) + 1, 1)[mask]
+        indices = np.arange(0, len(self), 1)[mask]
         self.subset(indices)
 
     def fit(
