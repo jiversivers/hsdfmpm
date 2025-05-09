@@ -117,6 +117,15 @@ class TestHyperspectralImage(unittest.TestCase):
         self.assertEqual(len(self.hsi), 2)
         npt.assert_array_equal(self.hsi.image, self.hs_vals[np.isin(self.md_vals['Wavelength'], np.arange(500, 520, 10))])
 
+    def test_subset_and_superset(self):
+        self.hsi.subset([1, 2])
+        self.assertEqual(len(self.hsi), 2)
+        npt.assert_array_equal(self.hsi.image, self.hs_vals[1:3])
+
+        self.hsi.superset()
+        self.assertEqual(len(self.hsi), 3)
+        npt.assert_array_equal(self.hsi.image, self.hs_vals)
+
 
     # TODO: Test apply kernel bank
     # TODO: Test apply mask
