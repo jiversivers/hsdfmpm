@@ -14,14 +14,6 @@ class TestHyperspectralImage(unittest.TestCase):
         patch_path_validators(self)
         add_patch_hsdfm_data(self)
 
-        # Mocking normalization arrays
-        self.std_arr = np.array([[[2, 1], [1, 2]],
-                                 [[3, 4], [4, 3]],
-                                 [[5, 6], [6, 5]]], dtype=np.float64)
-        self.bg_arr = np.array([[[0.5, 1.5], [1.5, 0.5]],
-                                [[0.0, 0.5], [0.5, 0.0]],
-                                [[0.0, 1.5], [1.5, 0.0]]], dtype=np.float64)
-
         # Create mock standards (in context to skip validation)
         with patch('hsdfmpm.hsdfm.hsdfm.read_metadata_json', return_value=self.md_vals):
             with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.std_arr):
@@ -48,12 +40,12 @@ class TestHyperspectralImage(unittest.TestCase):
         # With wavelength mask
         self.assertEqual(self.hsi_subset.metadata['ExpTime'], [self.md_vals['ExpTime'][wl] for wl in self.sel_wl_idx])
         self.assertEqual(self.hsi_subset.metadata['Wavelength'], [self.md_vals['Wavelength'][wl] for wl in self.sel_wl_idx])
-        self.assertTrue(self.hsi_subset._active.shape == (1, 2, 2))
+        self.assertTrue(self.hsi_subset._active.shape == (1, *self.hs_vals.shape[1:]))
         npt.assert_array_equal(self.hsi_subset._active, self.hs_vals[self.sel_wl_idx])
 
         # With scalar scalar
         self.assertEqual(self.hsi_with_scalar.metadata['ExpTime'], self.md_vals['ExpTime'])
-        npt.assert_array_equal(self.hsi_with_scalar._hyperstack, 0.5 * self.hs_vals)
+        npt.assert_array_equal(self.hsi_with_scalar._hyperstack, self.hs_vals / self.scalar)
         npt.assert_array_equal(self.hsi_with_scalar._active, self.hsi_with_scalar._hyperstack)
 
         # With array scalar
@@ -110,7 +102,8 @@ class TestHyperspectralImage(unittest.TestCase):
 
     def test_bin(self):
         self.hsi.bin(bin_factor=2)
-        npt.assert_array_equal(self.hsi, self.hs_vals.mean(axis=(1,2), keepdims=True))
+        self.assertEqual(self.hsi.shape, (23, 5, 5))
+        npt.assert_array_almost_equal(np.mean(self.hsi, axis=(1,2)), self.hs_vals.mean(axis=(1,2)))
 
     def test_subset_by_metadata(self):
         self.hsi.subset_by_metadata('Wavelength', np.arange(500, 520, 10))
@@ -123,7 +116,7 @@ class TestHyperspectralImage(unittest.TestCase):
         npt.assert_array_equal(self.hsi.image, self.hs_vals[1:3])
 
         self.hsi.superset()
-        self.assertEqual(len(self.hsi), 3)
+        self.assertEqual(len(self.hsi), 23)
         npt.assert_array_equal(self.hsi.image, self.hs_vals)
 
 
