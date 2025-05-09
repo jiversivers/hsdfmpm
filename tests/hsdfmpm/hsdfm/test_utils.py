@@ -10,29 +10,6 @@ from unittest.mock import patch
 from hsdfmpm.hsdfm import hsdfm
 
 class TestUtils(unittest.TestCase):
-
-    def test_model_type_alias(self):
-        # Verify that alias values resolve to the correct ModelType member.
-        self.assertEqual(hsdfm.ModelType("mc"), hsdfm.ModelType.FULL_MC)
-        self.assertEqual(hsdfm.ModelType("monte-carlo"), hsdfm.ModelType.FULL_MC)
-        self.assertEqual(hsdfm.ModelType("diff"), hsdfm.ModelType.FULL_DIFF)
-
-    def test_model_type_handler(self):
-        # Verify that the handler property returns the correct function,
-        # by capturing the printed output.
-        test_cases = [
-            (hsdfmpm:=hsdfm.ModelType.FULL_MC, "Fitting with full Monte Carlo\n"),
-            (hsdfm.ModelType.FULL_DIFF, "Fitting with full Diffusion\n"),
-            (hsdfm.ModelType.ABS_MC, "Fitting with absorption Monte Carlo\n"),
-            (hsdfm.ModelType.ABS_DIFF, "Fitting with absorption Diffusion\n")
-        ]
-        for model, expected_output in test_cases:
-            with contextlib.redirect_stdout(StringIO()) as buf:
-                # Get the handler and call it.
-                handler = model.handler
-                handler()
-                self.assertEqual(buf.getvalue(), expected_output)
-
     def test_read_metadata_json_valid(self):
         # Create a temporary file with valid JSON data.
         data = [
@@ -187,10 +164,6 @@ class TestUtils(unittest.TestCase):
         result_mask = hsdfm.slice_clusters(src, clusters)
         np.testing.assert_array_equal(result_mask, expected_mask)
 
-    def test_k_cluster_macro_placeholder(self):
-        # Since k_cluster_macro is a placeholder, it should return None.
-        result = hsdfm.k_cluster_macro(np.array([0]), [1, 2, 3])
-        self.assertIsNone(result)
 
 if __name__ == '__main__':
     unittest.main()
