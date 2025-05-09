@@ -77,18 +77,18 @@ def fit_voxel(
 
     residual_function = make_residual(voxel=voxel, model=model, loss_thresh=loss_thresh, score_function=score_function)
     jacobian_function = make_jacobian(voxel=voxel, model=model, eps=eps)
-    if loss_thresh is not None and loss_thresh > 0:
-        kwargs['gtol'] = 1e-15
-        kwargs['xtol'] = 1e-15
-        kwargs['ftol'] = 1e-15
     try:
-        _ = least_squares(residual_function, x0, jac=jacobian_function, **kwargs)
+        fit_result = least_squares(residual_function, x0, jac=jacobian_function, **kwargs)
     except LossIsGoodEnough as exc:
         params = exc.args[0]
         score = exc.args[1]
     else:
-        params = np.array([np.nan] * len(x0))
-        score = 1e6
+        if fit_result.success:
+            params = fit_result.x
+            score = score_function(model(*params), voxel, p=len(params))
+        else:
+            params = [np.nan] * len(x0)
+            score = 1e6
     return params, score
 
 
@@ -97,7 +97,7 @@ def volume_iter(
 ) -> Generator[tuple[int, int, np.ndarray[float]]]:
     """Yields a single voxel (H x W) from an image colume shape Ch x H x W, ignoring nan pixels"""
     for y, x in product(range(volume.shape[1]), range(volume.shape[2])):
-        if np.any(np.isnan(volume[:, y, x]), axis=0):
+        if np.any(np.isnan(volume[:, y, x])):
             continue
         yield y, x, volume[:, y, x]
 
@@ -116,7 +116,7 @@ def fit_volume(
 
     # Get n_workers and calculate chunksize (Enough for ~2 chunks per worker)
     n_workers = n_workers or mp.cpu_count() // 2
-    chunksize = (np.count_nonzero(~np.any(np.isnan(volume), axis=0)) / n_workers) // 2
+    chunksize = max(1, int((np.count_nonzero(~np.any(np.isnan(volume), axis=0))) / (2 * n_workers)))
 
     param_image = np.zeros((len(x0), *volume.shape[1:]), dtype=np.float32)
     score_image = np.zeros(volume.shape[1:], dtype=np.float32)
@@ -128,6 +128,6 @@ def fit_volume(
             chunksize=int(chunksize),
         )):
             param_image[:, y, x] = params
-            score_image[x, y] = score
+            score_image[y, x] = score
 
-    return param_image, score
+    return param_image, score_image
