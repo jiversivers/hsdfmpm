@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import cv2
 import numpy as np
-from matplotlib.colors import Colormap, Normalize
+from matplotlib.colors import Normalize
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, Colormap, LinearSegmentedColormap
 from pydantic import BaseModel, Field, computed_field, AfterValidator, model_validator
@@ -248,6 +248,8 @@ class ImageData(BaseModel):
     @computed_field
     @property
     def image(self) -> np.ndarray:
+        if hasattr(self, "subset_indices") and self.subset_indices is not None:
+            return self._active[self.subset_indices]
         return self._active
 
     @computed_field
@@ -290,13 +292,13 @@ class ImageData(BaseModel):
         )
 
         # Average over binning axes
-        self._active = cube_reshaped.mean(axis=(2, 4))
+        self._active = np.nanmean(cube_reshaped, axis=(2, 4))
 
     def resize_to(self, h: int):
         self.bin(bin_factor=self.shape[1] // h)
 
     def apply_kernel_bank(self, kernel_bank: np.ndarray) -> np.ndarray:
-        return apply_kernel_bank(self, kernel)
+        return apply_kernel_bank(self, kernel_bank)
 
     def apply_mask(self, mask):
         self._active[:, ~mask.astype(bool)] = np.nan
@@ -304,6 +306,12 @@ class ImageData(BaseModel):
     def write(self, filename: str = "processed.tiff", **kwargs):
         filename = ensure_path(filename)
         cv2.imwrite(str(filename), self._active, **kwargs)
+
+    def subset(self, indices: list[int]):
+        self.subset_indices = indices
+
+    def superset(self):
+        self.subset_indices = None
 
 
 class SerializableModel(BaseModel):
