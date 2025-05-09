@@ -268,7 +268,7 @@ class ImageData(BaseModel):
         if self._active.ndim < 3:
             return 1
         else:
-            return self._active.shape[-1]
+            return self.image.shape[0]
 
     @computed_field
     @property
