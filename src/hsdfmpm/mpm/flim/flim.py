@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import seaborn as sns
 from pydantic import model_validator, computed_field
+from scipy import signal
 from scipy.ndimage import median_filter
 
 from hsdfmpm.mpm.flim.utils import (
@@ -61,7 +62,7 @@ class LifetimeImage(ImageData):
         """Aliasing for clarity with other resources."""
         if self._active is None:
             self._active = self.hyperstack
-        return self._active
+        return self.image
 
     def load_irf(
         self,
@@ -72,10 +73,10 @@ class LifetimeImage(ImageData):
         self.calibration = get_irf(irf)
 
     def deconvolve(self):
-        deconvolved = np.zeros_like(self)
-        remainder = np.zeros_like(self)
+        deconvolved = np.zeros_like(self.image)
+        remainder = np.zeros_like(self.image)
         for c, y, x in product(range(self.shape[0]), range(self.shape[1]), range(self.shape[1])):
-            recovered, rem = signal.deconvolve(self, self.irf)
+            recovered, rem = signal.deconvolve(self.image, self.irf)
             deconvolved[c, y, x] = recovered
             remainder[c, y, x] = rem
         self.deconvolved = deconvolved
@@ -93,6 +94,7 @@ class LifetimeImage(ImageData):
         for i, ch in enumerate(_active):
             self._active = ch.permute(2, 0, 1)  # Move time axis to front
             out_image[i], red_chi_sq[i] = super().fit(model, **kwargs)
+            self._active = _active
         return out_image, red_chi_sq
 
     def phasor_coordinates(
