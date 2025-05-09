@@ -133,6 +133,9 @@ class MergedHyperspectralImage(BaseModel):
             self.listed_hyperstack.append(HyperspectralImage(**kwargs))
         return self
 
+    def __array__(self) -> np.ndarray[float]:
+        return self._active
+
     def __getattr__(self, attr):
         """Forward method calls to and get attributes from each instance of HyperspectralImage in the list."""
         first = self[0]

@@ -161,6 +161,9 @@ class TestMergedHyperspectralImage(unittest.TestCase):
         for mhsi, el in zip(self.mhsi, self.expected_list):
             npt.assert_array_equal(mhsi._hyperstack, el)
 
+    def test_array_dunder(self):
+        npt.assert_array_equal(self.mhsi, np.mean(np.array(self.expected_list), axis=0))
+
 
 if __name__ == '__main__':
     unittest.main()
