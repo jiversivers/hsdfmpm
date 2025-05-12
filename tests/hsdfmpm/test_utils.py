@@ -143,10 +143,11 @@ class TestImageData(unittest.TestCase):
         # This loads the hyperstack
         with patch('hsdfmpm.utils.read_hyperstack', return_value=self.hs_vals):
             npt.assert_array_equal(self.img.hyperstack, self.hs_vals)
-        self.img._hyperstack += 1
-        npt.assert_array_equal(self.img._hyperstack, self.hs_vals + 1)
-        self.img.reset()
-        npt.assert_array_equal(self.img.hyperstack, self.hs_vals)
+        self.img._active = self.img._hyperstack + 1
+        npt.assert_array_equal(self.img.image, self.hs_vals + 1)
+        with patch('hsdfmpm.utils.read_hyperstack', return_value=self.hs_vals):
+            self.img.reset()
+        npt.assert_array_equal(self.img.image, self.hs_vals)
 
 if __name__ == '__main__':
     unittest.main()
