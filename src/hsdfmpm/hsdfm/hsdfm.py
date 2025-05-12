@@ -1,10 +1,18 @@
 from typing import Optional, Callable
+from functools import partial
 
+from photon_canon.lut import LUT
+from photon_canon.contrib.bio import hemoglobin_mus
 from pydantic import model_validator, BaseModel, SkipValidation
 
 from .utils import *
 from ..utils import ImageData, read_hyperstack, add_arithmetic_methods
 from .fit import fit_volume
+
+
+def default_model(a: float, b: float, t: float, s: float, wavelengths: np.ndarray[float] = None, lut: LUT = None):
+    mu_s, mu_a, _ = hemoglobin_mus(a, b, t, s, wavelengths, force_feasible=False)
+    return lut(mu_s, mu_a)
 
 
 class HyperspectralImage(ImageData):
@@ -85,9 +93,16 @@ class HyperspectralImage(ImageData):
 
     def fit(
         self,
-        model: Callable[[float, float, ...], np.ndarray[float]],
-        x0: np.ndarray[float],
+        model: Callable[[float, float, ...], np.ndarray[float]] = None,
+        x0: np.ndarray[float] = None,
         **kwargs) -> tuple[np.ndarray[float], np.ndarray[float]]:
+
+        # Defaults
+        if model is None:
+            lut = LUT(dimensions=['mu_s', 'mu_a'], scale=50000, extrapolate=True)
+            model = partial(default_model, wavelengths=self.metadata['Wavelength'], lut=lut)
+        if x0 is None:
+            x0 = np.zeros(4)
 
         # Fit in parallel
         param_image, score = fit_volume(
