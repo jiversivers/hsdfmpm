@@ -29,8 +29,8 @@ def add_patch_hsdfm_data(self):
     self.md_vals = {'ExpTime': list(3 * rng.random(len(wavelengths))),
                     'Wavelength': list(wavelengths)}
     self.sel_wl_idx = [0]
-    self.bio_params = np.array([5 * rng.random((10, 10)), 2 * rng.random((10, 10)), rng.random((10, 10)), rng.random((10, 10))])
-    self.hs_vals = np.zeros((len(wavelengths), 10, 10))
+    self.bio_params = np.array([2.5 * rng.random((10, 10)) + 0.5, 1.5 * rng.random((10, 10)) + 0.5, rng.random((10, 10)), rng.random((10, 10))])
+    self.hs_vals = np.zeros((len(wavelengths), 10, 10), dtype=np.float32)
     for y, x in product(range(10), range(10)):
         self.hs_vals[:, y, x] = model_from_hemoglobin(lut, wavelengths, *self.bio_params[:, y, x])
     self.scalar = 2
