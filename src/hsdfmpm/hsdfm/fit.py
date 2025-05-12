@@ -1,7 +1,6 @@
 import numpy as np
 import multiprocessing as mp
-from itertools import product
-from tqdm import tqdm
+from tqdm.contrib.itertools import product
 from functools import partial
 
 from scipy.optimize import least_squares
@@ -25,11 +24,11 @@ def residual(
         *,
         model: Callable[[float, ...], float] = None,
         score_function: Callable[[np.ndarray[float, ...], np.ndarray[float, ...], int], float] = None,
-        loss_thresh: float = 1e-3) -> np.ndarray[float]:
+        loss_thresh: float = None) -> np.ndarray[float]:
     """Thin wrapper around the model to calculate residual and throw stop exception at loss threshold."""
     pred = model(*params)
     res = pred - voxel
-    if np.dot(res, res) <= loss_thresh:
+    if loss_thresh is not None and np.dot(res, res) <= loss_thresh:
         if score_function is not None:
             score = score_function(pred, voxel, p=len(params))
         else:
@@ -69,7 +68,7 @@ def fit_voxel(
     model: Callable[[float, ...], float],
     *,
     x0: list[float, ...],
-    loss_thresh: float = 1e-3,
+    loss_thresh: float = None,
     score_function: Callable[[np.ndarray[float, ...], np.ndarray[float, ...], int], float] = reduced_chi_squared,
     eps = 1e-4,
     **kwargs) -> tuple[np.ndarray[float, ...], np.ndarray[float, ...]]:
@@ -112,6 +111,7 @@ def fit_volume(
     volume: np.ndarray[float],
     n_workers: Optional[int] = None,
     x0: np.ndarray[float, ...] = None,
+    use_multiprocessing: bool = True,
     **kwargs) -> tuple[np.ndarray[float, ...], np.ndarray[float,...]]:
 
     # Get n_workers and calculate chunksize (Enough for ~2 chunks per worker)
@@ -121,13 +121,18 @@ def fit_volume(
     param_image = np.zeros((len(x0), *volume.shape[1:]), dtype=np.float32)
     score_image = np.zeros(volume.shape[1:], dtype=np.float32)
     voxel_mapper = partial(make_voxel_mapper, x0=x0, **kwargs)
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        for y, x, (params, score) in tqdm(executor.map(
-            voxel_mapper,  # -> y, x, (params, score)
-            volume_iter(volume),
-            chunksize=int(chunksize),
-        )):
-            param_image[:, y, x] = params
-            score_image[y, x] = score
+    if use_multiprocessing:
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            iterator = executor.map(
+                voxel_mapper,  # -> y, x, (params, score)
+                volume_iter(volume),
+                chunksize=int(chunksize),
+            )
+    else:
+        iterator = map(voxel_mapper, volume_iter(volume))
+
+    for y, x, (params, score) in iterator:
+        param_image[:, y, x] = params
+        score_image[y, x] = score
 
     return param_image, score_image
