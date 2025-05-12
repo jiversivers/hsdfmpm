@@ -1,9 +1,13 @@
 import unittest
 from pathlib import Path
 
+import cv2
 import numpy as np
 import numpy.testing as npt
 from unittest.mock import patch, MagicMock
+
+from numpy import dtype
+from scipy.signal import fftconvolve
 
 from hsdfmpm.hsdfm.hsdfm import HyperspectralImage, MergedHyperspectralImage
 from tests.__test_utils__ import patch_path_validators, add_patch_hsdfm_data
@@ -121,11 +125,23 @@ class TestHyperspectralImage(unittest.TestCase):
 
     def test_fit(self):
         param_img, score = self.hsi.fit(n_workers=10, x0=[1, 1, 1, 1], bounds=[(0, 0, 0, 0), (np.inf, np.inf, np.inf, 1)])
-        npt.assert_allclose(param_img, self.bio_params, rtol=5, atol=1e-2)
+        npt.assert_allclose(param_img, self.bio_params, rtol=1e-2, atol=1e-2)
         self.assertTrue(np.all(score < 2))
-        
 
-    # TODO: Test apply kernel bank
+    def test_apply_kernel_bank(self):
+        bank = np.random.random((4, 3, 3)).astype(np.float32)
+        bank /= np.sum(bank, axis=(1,2), keepdims=True)
+
+        filtered = self.hsi.apply_kernel_bank(bank, borderType=cv2.BORDER_CONSTANT)
+
+        actual = np.zeros_like(self.hs_vals, dtype=np.float32)
+
+        for k in bank:
+            conv = np.array([fftconvolve(hs.astype(np.float32), k[::-1, ::-1], mode='same') for hs in self.hs_vals])
+            actual = np.maximum(actual, conv)
+
+        npt.assert_allclose(filtered, actual, rtol=1e-6, atol=1e-6)
+
     # TODO: Test apply mask
 class TestMergedHyperspectralImage(unittest.TestCase):
     def setUp(self):
