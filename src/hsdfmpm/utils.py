@@ -13,8 +13,7 @@ import numpy as np
 from matplotlib.colors import Normalize
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, Colormap, LinearSegmentedColormap
-from pydantic import BaseModel, Field, computed_field, AfterValidator, model_validator
-import itertools
+from pydantic import BaseModel, Field, computed_field, AfterValidator
 
 DATA_PATH = Path.home() / ".hsdfmpm"
 DATA_PATH.mkdir(exist_ok=True, parents=True)
@@ -90,10 +89,10 @@ def read_hyperstack(img_dir: str, ext: str = ".tif") -> np.ndarray[float]:
 
 
 def apply_kernel_bank(
-    src: np.ndarray[float], bank: np.ndarray[float]
+    src: np.ndarray[float], bank: np.ndarray[float], **kwargs: Any
 ) -> np.ndarray[float]:
     return np.nanmax(
-        [cv2.filter2D(src, -1, k) for (k,) in itertools.product(bank)], axis=0
+        [cv2.filter2D(src, -1, k, **kwargs) for k in bank], axis=0
     )
 
 
@@ -297,8 +296,10 @@ class ImageData(BaseModel):
     def resize_to(self, h: int):
         self.bin(bin_factor=self.shape[1] // h)
 
-    def apply_kernel_bank(self, kernel_bank: np.ndarray) -> np.ndarray:
-        return apply_kernel_bank(self, kernel_bank)
+    def apply_kernel_bank(self, kernel_bank: np.ndarray, **kwargs) -> np.ndarray:
+        permuted = np.moveaxis(self.image.copy(), 0, -1)  # Permute to H, W, C
+        conv = apply_kernel_bank(permuted, kernel_bank, **kwargs)
+        return np.moveaxis(conv, -1, 0)
 
     def apply_mask(self, mask):
         self._active[:, ~mask.astype(bool)] = np.nan
