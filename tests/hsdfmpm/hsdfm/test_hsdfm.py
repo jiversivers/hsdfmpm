@@ -119,6 +119,11 @@ class TestHyperspectralImage(unittest.TestCase):
         self.assertEqual(len(self.hsi), 23)
         npt.assert_array_equal(self.hsi.image, self.hs_vals)
 
+    def test_fit(self):
+        param_img, score = self.hsi.fit(n_workers=10, x0=[1, 1, 1, 1], bounds=[(0, 0, 0, 0), (np.inf, np.inf, np.inf, 1)])
+        npt.assert_allclose(param_img, self.bio_params, rtol=5, atol=1e-2)
+        self.assertTrue(np.all(score < 2))
+        
 
     # TODO: Test apply kernel bank
     # TODO: Test apply mask
