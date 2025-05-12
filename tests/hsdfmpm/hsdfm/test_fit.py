@@ -72,3 +72,6 @@ class TestFitFunctions(unittest.TestCase):
         true_params = np.column_stack([self.params, self.params])
         true_params = np.stack([true_params, true_params], axis=-1)
         npt.assert_allclose(params, true_params, rtol=1e-7, atol=1e-9)
+
+if __name__ == '__main__':
+    unittest.main()
