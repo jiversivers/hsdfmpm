@@ -10,7 +10,7 @@ from ..utils import ImageData, read_hyperstack, add_arithmetic_methods
 from .fit import fit_volume
 
 
-def default_model(a: float, b: float, t: float, s: float, wavelengths: np.ndarray[float] = None, lut: LUT = None):
+def default_model(a: float, b: float, t: float, s: float, wavelengths: np.ndarray[float] = None, lut: LUT = None) -> np.ndarray[float]:
     mu_s, mu_a, _ = hemoglobin_mus(a, b, t, s, wavelengths, force_feasible=False)
     return lut(mu_s, mu_a)
 
