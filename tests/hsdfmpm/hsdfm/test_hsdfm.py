@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 from numpy import dtype
 from scipy.signal import fftconvolve
 
+from hsdfmpm.hsdfm.fit import reduced_chi_squared
 from hsdfmpm.hsdfm.hsdfm import HyperspectralImage, MergedHyperspectralImage
 from tests.__test_utils__ import patch_path_validators, add_patch_hsdfm_data
 
@@ -124,7 +125,13 @@ class TestHyperspectralImage(unittest.TestCase):
         npt.assert_array_equal(self.hsi.image, self.hs_vals)
 
     def test_fit(self):
-        param_img, score = self.hsi.fit(n_workers=10, x0=[1, 1, 1, 1], bounds=[(0, 0, 0, 0), (np.inf, np.inf, np.inf, 1)])
+        param_img, score = self.hsi.fit(
+            n_workers=10,
+            x0=[1, 1, 1, 1],
+            bounds=[(0, 0, 0, 0), (np.inf, np.inf, np.inf, 1)],
+            score_function=reduced_chi_squared,
+            max_nfev = 5000
+        )
         npt.assert_allclose(param_img, self.bio_params, rtol=1e-2, atol=1e-2)
         self.assertTrue(np.all(score < 2))
 
