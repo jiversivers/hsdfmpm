@@ -430,11 +430,24 @@ def get_phasor_coordinates(
     return g, s, photons
 
 
-def fit_phasor(g: np.ndarray[float], s: np.ndarray[float]) -> tuple[float, float]:
-    fit = polyfit(g.flatten(), s.flatten(), 1)
-    b = fit[0]
-    m = fit[1]
+def fit_phasor(g: np.ndarray[float], s: np.ndarray[float], ratio_threshold=3) -> tuple[float, float]:
+    vT, ratio, mu = phasor_svd(g, s)
+    if ratio < ratio_threshold:
+        return np.nan, np.nan
+    return convert_vT_to_point_slope(vT, mu)
+
+def convert_vT_to_point_slope(vT: np.ndarray[float, float], mu: np.ndarray[float, float]) -> tuple[float, float]:
+    dx, dy = vT[0]
+    m = dy / dx
+    b = -m * mu[0] + mu[1]
     return b, m
+
+def phasor_svd(g, s):
+    cloud = np.stack([g.flatten(), s.flatten()], axis=1)
+    mu = cloud.mean(axis=0)
+    cloud -= mu  # Center cloud
+    _, s, vT = np.linalg.svd(cloud, full_matrices=False)
+    return vT, s[0] / s[1], mu
 
 
 def find_intersection_with_circle(
