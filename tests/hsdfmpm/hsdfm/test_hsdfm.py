@@ -155,7 +155,7 @@ class TestMergedHyperspectralImage(unittest.TestCase):
         patch_path_validators(self)
         add_patch_hsdfm_data(self)
         self.expected_list = [self.hs_vals - 1, self.hs_vals, self.hs_vals + 1]
-        self.md_path = 'this/is/on/listed'
+        self.md_path = 'this/is/on/listed.json'
 
         with patch('hsdfmpm.hsdfm.hsdfm.read_metadata_json', return_value=self.md_vals):
             with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack') as hyperstacker:
