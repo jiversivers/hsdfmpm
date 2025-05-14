@@ -222,8 +222,9 @@ class InstrumentResponseFunction(LifetimeImage, SerializableModel):
     def store(self, path: Optional[str] = None):
         if path is None:
             path = IRF_PATH
+        path = ensure_path(path)
         if path.is_dir():
-            self.save_pickle(path / f"irf.pkl")
+            self.save_pickle(path / "irf.pkl")
         else:
             self.save_pickle(path)
 
