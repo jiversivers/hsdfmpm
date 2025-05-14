@@ -114,9 +114,9 @@ def fit_volume(
     use_multiprocessing: bool = True,
     **kwargs) -> tuple[np.ndarray[float, ...], np.ndarray[float,...]]:
 
-    # Get n_workers and calculate chunksize (Enough for ~2 chunks per worker)
+    # Get n_workers and calculate chunksize (Enough for ~1 chunk per worker)
     n_workers = n_workers or mp.cpu_count() // 2
-    chunksize = max(1, int((np.count_nonzero(~np.any(np.isnan(volume), axis=0))) / (2 * n_workers)))
+    chunksize = max(1, int((np.count_nonzero(~np.any(np.isnan(volume), axis=0))) / n_workers))
 
     param_image = np.zeros((len(x0), *volume.shape[1:]), dtype=np.float32)
     score_image = np.zeros(volume.shape[1:], dtype=np.float32)
