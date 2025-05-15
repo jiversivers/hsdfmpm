@@ -116,12 +116,12 @@ def add_patch_flim_data(self):
         }}
     tau1, tau2 = rng.random(2, dtype=np.float64)
     self.tau1 = tau1 * 1e-9
-    self.tau2 = tau2 * 10e-9
+    self.tau2 = tau2 * 5e-9
     self.alpha = rng.uniform(0.4, 0.6, size=(256, 256, 1))
-    tau1 = np.full_like(self.alpha, tau1)
-    tau2 = np.full_like(self.alpha, tau2)
+    tau1 = np.full_like(self.alpha, self.tau1)
+    tau2 = np.full_like(self.alpha, self.tau2)
     decay = generate_decay_histogram(tau1, tau2, alpha=self.alpha, n_photons=self.total_photons, bin_count=self.bins)
     self.true_decay = decay
-    self.irf = gaussian_irf(fwhm=1.0, period_ns=10, bin_count=self.bins, centre=0, oversample=8)[np.newaxis, np.newaxis, np.newaxis, ...]
+    self.irf = gaussian_irf(fwhm=1.0, period_ns=10, bin_count=self.bins, centre=1, oversample=8)[np.newaxis, np.newaxis, np.newaxis, ...]
     self.decay = convolve_with_irf(decay, self.irf)
 
