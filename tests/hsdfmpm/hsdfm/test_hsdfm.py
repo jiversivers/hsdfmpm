@@ -6,7 +6,6 @@ import numpy as np
 import numpy.testing as npt
 from unittest.mock import patch, MagicMock
 
-from numpy import dtype
 from scipy.signal import fftconvolve
 
 from hsdfmpm.hsdfm.fit import reduced_chi_squared
@@ -20,15 +19,15 @@ class TestHyperspectralImage(unittest.TestCase):
         add_patch_hsdfm_data(self)
 
         # Create mock standards (in context to skip validation)
-        with patch('hsdfmpm.hsdfm.hsdfm.read_metadata_json', return_value=self.md_vals):
-            with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.std_arr):
+        with patch('hsdfmpm.hsdfm.hsdfm.read_metadata_json', side_effect=lambda *a, **kw:self.md_vals.copy()):
+            with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', side_effect=lambda *a, **kw:self.std_arr.copy()):
                 self.mock_std = MergedHyperspectralImage(image_paths=['dummy/path2', 'dummy/path2'])
                 self.mock_std = HyperspectralImage(image_path='dummy/path2')
 
-            with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.bg_arr):
+            with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', side_effect=lambda *a, **kw:self.bg_arr.copy()):
                 self.mock_bg = HyperspectralImage(image_path='dummy/path')
 
-            with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', return_value=self.hs_vals):
+            with patch('hsdfmpm.hsdfm.hsdfm.read_hyperstack', side_effect=lambda *a, **kw:self.hs_vals.copy()):
                 self.hsi = HyperspectralImage(image_path="dummy_path")
                 self.hsi_subset = HyperspectralImage(image_path="dummy_path", wavelengths=[self.md_vals['Wavelength'][wl] for wl in self.sel_wl_idx])
                 self.hsi_with_scalar = HyperspectralImage(image_path="dummy_path", scalar=self.scalar)

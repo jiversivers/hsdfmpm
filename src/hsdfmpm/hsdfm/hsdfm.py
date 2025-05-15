@@ -39,11 +39,11 @@ class HyperspectralImage(ImageData):
         metadata_path = list(self.image_path.glob(f"*{self.metadata_ext}"))[0]
 
         # Load image metadata
-        self.metadata = read_metadata_json(metadata_path).copy()
+        self.metadata = read_metadata_json(metadata_path)
 
         # Load hyperstack
         hyperstack = read_hyperstack(img_dir=self.image_path, ext=self.image_ext)
-        self._hyperstack = hyperstack.copy()
+        self._hyperstack = hyperstack
         try:
             self._hyperstack /= self.scalar
             scale_after_masking = False
