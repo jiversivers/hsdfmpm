@@ -21,6 +21,8 @@ from hsdfmpm.mpm.flim.utils import (
     project_to_line,
     fit_phasor,
     get_endpoints_from_projection,
+    complex_phasor,
+    cartesian_from_lifetime
 )
 from hsdfmpm.utils import SerializableModel, DATA_PATH, ImageData, ensure_path
 
@@ -73,14 +75,14 @@ class LifetimeImage(ImageData):
         self.calibration = get_irf(irf)
 
     def deconvolve(self):
-        deconvolved = np.zeros_like(self.image)
-        remainder = np.zeros_like(self.image)
-        for c, y, x in product(range(self.shape[0]), range(self.shape[1]), range(self.shape[1])):
-            recovered, rem = signal.deconvolve(self.image, self.irf)
-            deconvolved[c, y, x] = recovered
-            remainder[c, y, x] = rem
-        self.deconvolved = deconvolved
-        return remainder
+        # TODO: Adde weiner correction term for tail-truncation of true convolution
+        T = self.shape[-1]
+        conv_L = T + self.calibration.shape[-1] - 1
+        decay = np.fft.fft(self.decay, n=conv_L, axis=-1)
+        irf = np.fft.fft(self.calibration / self.calibration.decay.sum(axis=-1, keepdims=-1), n=conv_L, axis=-1)
+        decay /= irf
+        decay = np.fft.ifft(decay, axis=-1).real
+        self._active = decay[..., :T]
 
     def fit(
         self,
@@ -94,7 +96,7 @@ class LifetimeImage(ImageData):
         for i, ch in enumerate(_active):
             self._active = ch.permute(2, 0, 1)  # Move time axis to front
             out_image[i], red_chi_sq[i] = super().fit(model, **kwargs)
-            self._active = _active
+        self._active = _active
         return out_image, red_chi_sq
 
     def phasor_coordinates(
@@ -103,27 +105,25 @@ class LifetimeImage(ImageData):
         threshold: float = 0,
         median_filter_count: int = 0,
         k_size: Union[tuple[int, int], int] = (3, 3),
-    ) -> np.ndarray:
+        as_complex: bool = False) -> tuple[np.ndarray, np.ndarray]:
 
-        g, s, photons = get_phasor_coordinates(
+        P, photons = get_phasor_coordinates(
             self.decay,
             bin_width=self.bin_width,
             frequency=self.frequency,
             harmonic=self.harmonic,
             threshold=threshold,
+            as_complex=True
         )
-
-        # Convert to polar coordinates
-        phase, modulation = polar_from_cartesian(g, s)
 
         # Apply correction
         if self.calibration is not None and correction:
             # Apply correction
-            phase += self.calibration.phase_offset
-            modulation *= self.calibration.modulation_factor
+            P *= self.calibration.correction
+        g, s = P.real, P.imag
 
-            # Convert to cartesian
-            g, s = cartesian_from_polar(phase, modulation)
+        # Convert to polar coordinates
+        phase, modulation = polar_from_cartesian(g, s)
 
         # Add derivative attributes
         # Phi: Phase, M: Modulation
@@ -140,6 +140,8 @@ class LifetimeImage(ImageData):
             self.tau_phi = (1 / self.omega) * np.tan(phase)
             self.tau_m = (1 / self.omega) * np.sqrt((modulation**-2) - 1)
 
+        if as_complex:
+            return complex_phasor(g, s)
         return g, s
 
     def fit_for_lifetime_approximations(self, **kwargs):
@@ -204,19 +206,14 @@ class InstrumentResponseFunction(LifetimeImage, SerializableModel):
             self.resize_to(self.new_size)
 
         # Get raw coordinates
-        g, s = self.phasor_coordinates(correction=False)
-
-        # Convert to polar
-        phase, modulation = polar_from_cartesian(g, s)
+        P_ref = self.phasor_coordinates(correction=False, as_complex=True)
 
         # Get references
-        self.reference_phase, self.reference_modulation = polar_from_lifetime(
-            self.reference_lifetime, self.omega
-        )
+        P_true = cartesian_from_lifetime(self.reference_lifetime, self.omega, as_complex=True)
 
-        # Calculate correction factors
-        self.phase_offset = self.reference_phase - phase
-        self.modulation_factor = self.reference_modulation / modulation
+        # Calculate complex correction factor
+        self.correction = P_true / P_ref
+
         return self
 
     def store(self, path: Optional[str] = None):
