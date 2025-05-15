@@ -256,33 +256,46 @@ def open_sdt_file_with_json_metadata(filename):
     return out["decay"], json_metadata
 
 
-def polar_from_cartesian(x, y):
+def polar_from_cartesian(
+        x: np.ndarray[float],
+        y: np.ndarray[float]) -> tuple[np.ndarray[float], np.ndarray[float]]:
     z = x + 1j * y
     return np.angle(z), np.abs(z)
 
 
-def cartesian_from_polar(theta, r):
+def cartesian_from_polar(theta: np.ndarray[float],
+                         r: np.ndarray[float],
+                         as_complex: bool = False) -> np.ndarray[float]:
     z = r * np.exp(1j * theta)
+    if as_complex:
+        return z
     return z.real, z.imag
 
 
-def lifetime_from_cartesian(x, y, omega):
+def lifetime_from_cartesian(x: float, y: float, omega: float, harmonic: int = 1):
     return (1 / omega) * np.tan(np.arctan2(y, x))
 
 
-def cartesian_from_lifetime(tau, omega):
-    phi, m = polar_from_lifetime(tau, omega)
-    return cartesian_from_polar(phi, m)
+def cartesian_from_lifetime(tau: float,
+                            omega: float,
+                            harmonic: int = 1,
+                            as_complex: bool = False) -> np.ndarray[float]:
+    phi, m = polar_from_lifetime(tau, omega, harmonic)
+    return cartesian_from_polar(phi, m, as_complex)
 
 
-def polar_from_lifetime(tau, omega):
-    phi = np.arctan(omega * tau)
-    m = 1 / np.sqrt(1 + (omega * tau) ** 2)
+def polar_from_lifetime(tau: float, omega: float, harmonic: int = 1):
+    phi = np.arctan(harmonic * omega * tau)
+    m = 1 / np.sqrt(1 + (harmonic * omega * tau) ** 2)
     return phi, m
+
+def complex_phasor(g: np.ndarray[float], s: np.ndarray[float]) -> np.ndarray[complex]:
+    return g + 1j * s
 
 
 def plot_universal_circle(
     omega: float,
+    harmonic: int = 1,
     tau_labels: Optional[list[float]] = None,
     ax: Optional[plt.Axes] = None,
 ) -> tuple[plt.Axes, np.ndarray[float]]:
@@ -303,7 +316,7 @@ def plot_universal_circle(
     if tau_labels is not None:
         xy_coords = np.zeros((len(tau_labels), 2), dtype=np.float64)
         for i, label in enumerate(tau_labels):
-            x, y = cartesian_from_lifetime(label, omega)
+            x, y = cartesian_from_lifetime(label, harmonic * omega)
             ax.scatter(x, y, s=5, color="black", label="_nolegend_")
             xy_coords[i] = [x, y]
     else:
@@ -401,12 +414,12 @@ class PhasorPlot(BaseModel):
 
 
 def get_phasor_coordinates(
-    decay,
+    decay: np.ndarray[float],
     bin_width: float = 10 / 256 / 1e9,
     frequency: float = 80e6,
     harmonic: int = 1,
     threshold: float = 0,
-) -> np.ndarray:
+    as_complex: bool = False) -> np.ndarray:
     """Helper function to get the raw phasor coordinates from a decay curve given the imaging parameters provided."""
     T = decay.shape[-1]
     dt = bin_width
@@ -426,23 +439,33 @@ def get_phasor_coordinates(
     with np.errstate(divide="ignore", invalid="ignore"):
         g = np.where(photons > threshold, g / photons, 0)
         s = np.where(photons > threshold, s / photons, 0)
-
+    if as_complex:
+        return complex_phasor(g, s), photons
     return g, s, photons
 
 
-def fit_phasor(g: np.ndarray[float], s: np.ndarray[float], ratio_threshold=3) -> tuple[float, float]:
+def fit_phasor(
+        g: np.ndarray[float],
+        s: np.ndarray[float],
+        ratio_threshold=3) -> tuple[float, float]:
     vT, ratio, mu = phasor_svd(g, s)
     if ratio < ratio_threshold:
         return np.nan, np.nan
     return convert_vT_to_point_slope(vT, mu)
 
-def convert_vT_to_point_slope(vT: np.ndarray[float, float], mu: np.ndarray[float, float]) -> tuple[float, float]:
+
+def convert_vT_to_point_slope(
+        vT: np.ndarray[float, float],
+        mu: np.ndarray[float, float]) -> tuple[float, float]:
     dx, dy = vT[0]
     m = dy / dx
     b = -m * mu[0] + mu[1]
     return b, m
 
-def phasor_svd(g, s):
+
+def phasor_svd(
+        g: np.ndarray[float],
+        s: np.ndarray[float]) -> tuple[np.ndarray[float, float], float, np.ndarray[float, float]]:
     cloud = np.stack([g.flatten(), s.flatten()], axis=1)
     mu = cloud.mean(axis=0)
     cloud -= mu  # Center cloud
