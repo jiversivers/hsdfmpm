@@ -70,13 +70,13 @@ def convolve_with_irf(decay, irf):
     while decay.ndim < irf.ndim:
         decay = np.expand_dims(decay, axis=0)
     T = decay.shape[-1]
-    decay_area = np.sum(decay, axis=-1, keepdims=True)
     conv_L = decay.shape[-1] + irf.shape[-1] - 1
     decay = np.fft.fft(decay, n=conv_L, axis=-1)
     irf = np.fft.fft(irf / irf.sum(axis=-1, keepdims=-1), n=conv_L, axis=-1)
     decay *= irf
     decay = np.fft.ifft(decay, axis=-1).real
     return decay[..., :T]
+
 
 def gaussian_irf(fwhm: float,
                  period_ns: float = 10,
@@ -114,7 +114,6 @@ def add_patch_flim_data(self):
             "tac_r": 5.0033573728569536e-08,
             "tac_g": 5
         }}
-    bin_width = self.sdt_md['measurementInfo']['tac_g'] / self.sdt_md['measurementInfo']['tac_g'] / self.bins
     tau1, tau2 = rng.random(2, dtype=np.float64)
     self.tau1 = tau1 * 1e-9
     self.tau2 = tau2 * 10e-9
@@ -122,6 +121,7 @@ def add_patch_flim_data(self):
     tau1 = np.full_like(self.alpha, tau1)
     tau2 = np.full_like(self.alpha, tau2)
     decay = generate_decay_histogram(tau1, tau2, alpha=self.alpha, n_photons=self.total_photons, bin_count=self.bins)
-    self.irf = gaussian_irf(fwhm=1.0, period_ns=10, bin_count=self.bins, centre=2, oversample=8)
-    self.decay = convolve_with_irf(decay[np.newaxis, ...], self.irf)
+    self.true_decay = decay
+    self.irf = gaussian_irf(fwhm=1.0, period_ns=10, bin_count=self.bins, centre=0, oversample=8)[np.newaxis, np.newaxis, np.newaxis, ...]
+    self.decay = convolve_with_irf(decay, self.irf)
 
