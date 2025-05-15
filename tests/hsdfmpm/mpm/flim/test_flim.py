@@ -41,6 +41,17 @@ class TestFlim(unittest.TestCase):
         self.assertAlmostEqual(g.mean(), gt.mean(), delta=0.1)
         self.assertAlmostEqual(s.mean(), st.mean(), delta=0.1)
 
+    def test_fit_for_lifetime_approximation(self):
+        alphas, tau_m, taus = self.mock_decay.fit_for_lifetime_approximations()
+        true_tau_m = self.alpha * self.tau1 + (1 - self.alpha) * self.tau2
+        npt.assert_allclose(alphas[0].squeeze(), self.alpha.squeeze(), atol=0.2, rtol=0.1)
+        npt.assert_allclose(tau_m.squeeze(), true_tau_m.squeeze(), atol=0.2, rtol=0.1)
+        self.assertAlmostEqual(taus[0], self.tau1.mean(), delta=0.1)
+        self.assertAlmostEqual(taus[1], self.tau2.mean(), delta=0.1)
+
+    def test_bin(self):
+        self.mock_decay.resize_to(32)
+        self.assertEqual(self.mock_decay.shape, (1, 32, 32, 256))
 
 if __name__ == '__main__':
     unittest.main()
