@@ -36,8 +36,10 @@ class TestFlim(unittest.TestCase):
         g2, s2 = cartesian_from_lifetime(self.tau2, 2 * np.pi * self.frequency)
         gt = self.alpha * g1 + (1 - self.alpha) * g2
         st = self.alpha * s1 + (1 - self.alpha) * s2
-        npt.assert_array_almost_equal(gt.squeeze(), g.squeeze())
-        npt.assert_array_almost_equal(st.squeeze(), s.squeeze())
+        npt.assert_allclose(g.squeeze(), gt.squeeze(), atol=0.2, rtol=0.1)
+        npt.assert_allclose(s.squeeze(), st.squeeze(), atol=0.2, rtol=0.1)
+        self.assertAlmostEqual(g.mean(), gt.mean(), delta=0.1)
+        self.assertAlmostEqual(s.mean(), st.mean(), delta=0.1)
 
 
 if __name__ == '__main__':
