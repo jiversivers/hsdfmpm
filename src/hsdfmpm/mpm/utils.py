@@ -1,4 +1,4 @@
-import importlib
+import importlib.resources
 import xml.etree.ElementTree as ET
 from enum import Enum
 
