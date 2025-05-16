@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from pydantic import model_validator, computed_field
 from scipy import signal
-from scipy.ndimage import median_filter
+from scipy.ndimage import generic_filter
 
 from hsdfmpm.mpm.flim.utils import (
     open_sdt_file_with_json_metadata,
@@ -107,12 +107,11 @@ class LifetimeImage(ImageData):
         k_size: Union[tuple[int, int], int] = (3, 3),
         as_complex: bool = False) -> tuple[np.ndarray, np.ndarray]:
 
-        P, photons = get_phasor_coordinates(
+        P, self.photons = get_phasor_coordinates(
             self.decay,
             bin_width=self.bin_width,
             frequency=self.frequency,
             harmonic=self.harmonic,
-            threshold=threshold,
             as_complex=True
         )
 
@@ -120,42 +119,56 @@ class LifetimeImage(ImageData):
         if self.calibration is not None and correction:
             # Apply correction
             P *= self.calibration.correction
-        g, s = P.real, P.imag
+        self.g, self.s = P.real, P.imag
 
         # Convert to polar coordinates
-        phase, modulation = polar_from_cartesian(g, s)
+        phase, modulation = polar_from_cartesian(self.g, self.s)
 
         # Add derivative attributes
         # Phi: Phase, M: Modulation
         self.phi = phase
         self.m = modulation
 
+        # Mask the coordinates by photon counts
+        self.g = np.where(self.photons > threshold, self.g, np.nan)
+        self.s = np.where(self.photons > threshold, self.s, np.nan)
+
         # Median filter G and S for median_filter_count passes with input size kernel
         for _ in range(median_filter_count):
-            g = median_filter(g, k_size)
-            s = median_filter(s, k_size)
+            self.g = generic_filter(self.g, np.nanmedian, size=k_size, mode='nearest')
+            self.s = generic_filter(self.s, np.nanmedian, size=k_size, mode='nearest')
 
-        # Tau_phi: Phi-based lifetime, Tau_m: Modulation based lifetime
         with np.errstate(divide="ignore", invalid="ignore"):
+            # Tau_phi: Phi-based lifetime, Tau_m: Modulation based lifetime
             self.tau_phi = (1 / self.omega) * np.tan(phase)
             self.tau_m = (1 / self.omega) * np.sqrt((modulation**-2) - 1)
 
         if as_complex:
-            return complex_phasor(g, s)
-        return g, s
+            return complex_phasor(self.g, self.s)
+        return self.g, self.s
 
-    def fit_for_lifetime_approximations(self, **kwargs):
-        # Get the coords
-        g, s = self.phasor_coordinates(**kwargs)
+    def get_phasor_line(self, **kwargs):
+        if not (hasattr(self, 'g') and hasattr(self, 's')) or kwargs:
+            self.phasor_coordinates(**kwargs)
 
         # Fit a line to the cloud
-        b, m = fit_phasor(g, s)
+        b, m = fit_phasor(self.g, self.s)
 
         # find circle interseciton points
         x, y = find_intersection_with_circle(b, m)
 
-        # Project to the line segment
-        gp, sp = project_to_line(g, s, x, y)
+        return {'intersection': (x, y),
+                'point-slope': (b, m)}
+
+
+    def fit_for_lifetime_approximations(self, **kwargs):
+        if not (hasattr(self, 'g') and hasattr(self, 's')) or kwargs:
+            self.phasor_coordinates(**kwargs)
+
+        x, y = self.get_phasor_line(**kwargs)['intersection']
+
+         # Project to the line segment
+        gp, sp = project_to_line(self.g, self.s, x, y)
 
         # Find lifetime components
         tau = lifetime_from_cartesian(x, y, self.omega)
