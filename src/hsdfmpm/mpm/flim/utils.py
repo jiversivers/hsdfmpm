@@ -435,10 +435,10 @@ def get_phasor_coordinates(
     s = np.sum(decay * np.sin(w * t), axis=-1)
     photons = np.sum(decay, axis=-1)
 
-    # Normalize to counts and zero pixels below threshold count
     with np.errstate(divide="ignore", invalid="ignore"):
-        g = np.where(photons > threshold, g / photons, 0)
-        s = np.where(photons > threshold, s / photons, 0)
+        g /= photons
+        s /= photons
+
     if as_complex:
         return complex_phasor(g, s), photons
     return g, s, photons
@@ -447,8 +447,9 @@ def get_phasor_coordinates(
 def fit_phasor(
         g: np.ndarray[float],
         s: np.ndarray[float],
-        ratio_threshold=3) -> tuple[float, float]:
-    vT, ratio, mu = phasor_svd(g, s)
+        ratio_threshold=1.5) -> tuple[float, float]:
+    mask = ~(np.isnan(g) | np.isnan(s))
+    vT, ratio, mu = phasor_svd(g[mask], s[mask])
     if ratio < ratio_threshold:
         return np.nan, np.nan
     return convert_vT_to_point_slope(vT, mu)
