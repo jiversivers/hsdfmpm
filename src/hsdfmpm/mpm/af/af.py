@@ -125,12 +125,12 @@ class OpticalRedoxRatio(BaseModel):
     @computed_field
     @property
     def fad(self) -> np.ndarray:
-        return self.ex855[1]
+        return self.ex855[1].copy()
 
     @computed_field
     @property
     def nadh(self) -> np.ndarray:
-        return self.ex755[2]
+        return self.ex755[2].copy()
 
     @computed_field
     @property
