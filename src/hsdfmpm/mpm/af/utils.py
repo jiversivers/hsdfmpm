@@ -1,9 +1,8 @@
 from datetime import datetime
-from typing import Union, Optional, Callable
 from pathlib import Path
+from typing import Union, Optional, Callable
 
 import numpy as np
-
 
 from ..utils import LaserFlag, TRANSFER_FUNCTION_DATA
 from ...utils import iterable_array, ensure_path
@@ -20,7 +19,7 @@ def get_transfer_function(
 
     # Filter rows based on the date and laserFlag
     valid_rows = TRANSFER_FUNCTION_DATA[
-        (TRANSFER_FUNCTION_DATA["startDate"] <= date)
+        ~(TRANSFER_FUNCTION_DATA["startDate"] > date)
         & ~(TRANSFER_FUNCTION_DATA["endDate"] < date)
         & (TRANSFER_FUNCTION_DATA["laserFlag"] == laser_flag.value)
     ]
@@ -81,7 +80,7 @@ def get_transfer_function(
         # Calculate transfer function
         g = params[0] * gain ** params[1]
 
-        img = ((img - offset) / (pwr**2)) / g
+        img = ((img - offset) / (pwr ** 2)) / g
 
         return img
 
