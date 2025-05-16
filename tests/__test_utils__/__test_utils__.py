@@ -1,7 +1,13 @@
+import itertools
+from datetime import datetime
 from itertools import product
 import pathlib
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+from xml.etree.ElementTree import Element, ElementTree
+
 import numpy as np
+import pandas as pd
+from hsdfmpm.mpm import AutofluorescenceImage, OpticalRedoxRatio
 from photon_canon.lut import LUT
 from photon_canon.contrib.bio import model_from_hemoglobin
 
@@ -14,7 +20,7 @@ def patch_path_validators(self):
     # Patches for file-paths (one-time patch for the test)
     is_dir_patch = patch.object(pathlib.Path, 'is_dir', new=lambda x: '.' not in str(x))
     is_file_patch = patch.object(pathlib.Path, 'is_file', new=lambda x: '.' in str(x))
-    glob_patch = patch('pathlib.Path.glob', side_effect=lambda x:[f'/path/to/metadata_{x.strip('*')}'])
+    glob_patch = patch('pathlib.Path.glob', side_effect=lambda x:[pathlib.Path(f'/path/to/metadata_{x.strip('*')}')])
 
     self.mock_is_dir = is_dir_patch.start()
     self.mock_is_file = is_file_patch.start()
@@ -42,8 +48,76 @@ def add_patch_hsdfm_data(self):
 
 def add_patch_af_data(self):
     """Helper for testing to add patch mpm data to the test object."""
-    print(self.type)
-    pass
+    self.dates = ['12/11/1009 8:07:06 PM', '01/02/3456 7:01:23 AM']
+    self.mmddyyy = [
+        datetime.strftime(datetime.strptime(date, "%m/%d/%Y %I:%M:%S %p"), "%m%d%Y")
+        for date in self.dates
+    ]
+    self.power_used = [30, 35]
+    self.ref_attenuation = [25, 30, 35, 40]
+    self.laser_power = [[m * a - b for a in self.ref_attenuation] for m, b in zip([4.5, 5.5], [-0.25, 0.25])]
+    self.laser_wavelength = [755, 855]
+    self.laser = 'InsightX3'
+    self.pmt_gains = [400, 500, 600, 700]
+    self.g_params = [[1.00e-22, 7.8731],
+                     [6.55e-24, 8.029222607]]
+    self.offsets = [[0.0, 0.0, 0.0, 0.0],
+                    [379.7346952,446.6135238,379.3671238,71.04764762]]
+    self.md_dicts = [{
+        'laserPower': {'elements': {'IndexedValue': [{'value': power}]}},
+        'laserWavelength': {'elements': {'IndexedValue': [{'value': wavelength, 'description': self.laser}]}},
+        'pmtGain': {'elements': {'IndexedValue': [{'value': gain} for gain in self.pmt_gains]}}
+    } for power, wavelength in zip(self.power_used, self.laser_wavelength)]
+
+    self.power = pd.DataFrame(
+        {"Unnamed: 0":self.ref_attenuation,
+         self.laser_wavelength[0]:self.laser_power[0],
+         self.laser_wavelength[1]:self.laser_power[1]}
+    )
+
+    self.ex755 = rng.integers(0, 2**16, size=(4, 256, 256))
+    self.ex855 = rng.integers(0, 2**16, size=(4, 256, 256))
+
+    # Add actual mocks to self
+    root_mock = MagicMock(spec=Element)
+    root_mock.iter.side_effect = itertools.cycle([[{'date': date}] for date in self.dates])
+
+    tree_mock = MagicMock(spec=ElementTree)
+    tree_mock.getroot.return_value = root_mock
+
+    with patch('xml.etree.ElementTree.parse', return_value=tree_mock):
+        with patch('hsdfmpm.mpm.af.af.get_pvstate_values', side_effect=itertools.cycle(self.md_dicts)):
+            with patch('hsdfmpm.utils.read_hyperstack', side_effect=itertools.cycle([self.ex755.copy(), self.ex855.copy()])):
+                with patch('pandas.read_excel', return_value=self.power):
+                    self.mock_755 = AutofluorescenceImage(
+                        image_path='path/to/images/redox755',
+                        power_file_path='power/dir',
+                    )
+                    self.mock_855 = AutofluorescenceImage(
+                        image_path='path/to/images/redox855',
+                        power_file_path='power/dir',
+                    )
+
+                    self.mock_orr_path = OpticalRedoxRatio(
+                        ex755='path/to/images/redox755',
+                        ex855='path/to/images/redox855',
+                        power_file_path='power/dir',
+                    )
+
+                    self.mock_orr_obj = OpticalRedoxRatio(
+                        ex755=self.mock_755,
+                        ex855=self.mock_855,
+                    )
+
+    self.normalized = [(
+            ((img - np.asarray(offset)[..., np.newaxis, np.newaxis]) /
+             (self.power[wavel][self.power["Unnamed: 0"] == pwr].values.item() ** 2)) /
+            (g_params[0] * np.asarray(self.pmt_gains)[..., np.newaxis, np.newaxis] ** g_params[1])
+    ) for img, offset, wavel, pwr, g_params in zip([self.ex755, self.ex855], self.offsets, self.laser_wavelength, self.power_used, self.g_params)]
+
+    self.orr_objects = [self.mock_orr_obj, self.mock_orr_path]
+    self.orr = self.normalized[1][1] / (self.normalized[1][1] + self.normalized[0][2])
+
 
 def generate_decay_histogram(tau1, tau2=None, alpha=1.0, n_photons=1e3, bin_count=256, t_max=10.0e-9):
     tau1 = np.asanyarray(tau1, dtype=float)
