@@ -224,6 +224,7 @@ class ImageData(BaseModel):
     ] = None
     _hyperstack: Optional[np.ndarray] = None
     _active: Optional[np.ndarray] = None
+    _subset_indices: Optional[list] = None
 
     class Config:
         extra = "allow"
@@ -247,8 +248,8 @@ class ImageData(BaseModel):
     @computed_field
     @property
     def image(self) -> np.ndarray:
-        if hasattr(self, "subset_indices") and self.subset_indices is not None:
-            return self._active[self.subset_indices]
+        if self._subset_indices is not None:
+            return self._active[self._subset_indices]
         return self._active
 
     @computed_field
@@ -258,6 +259,7 @@ class ImageData(BaseModel):
 
     def reset(self):
         self._hyperstack = None
+        self._subset_indices = None
         self._active = self.hyperstack
 
     def __getitem__(self, item: int) -> np.ndarray:
@@ -275,7 +277,7 @@ class ImageData(BaseModel):
         return self._active.shape
 
     def __array__(self, dtype=None, copy=None):
-        return self._active.astype(dtype, copy=copy)
+        return self.image.astype(dtype, copy=copy)
 
     def bin(self, bin_factor: int = 4):
         bands, h, w = self.shape
@@ -302,6 +304,7 @@ class ImageData(BaseModel):
         return np.moveaxis(conv, -1, 0)
 
     def apply_mask(self, mask):
+        # TODO: Create reversible mask application
         self._active[:, ~mask.astype(bool)] = np.nan
 
     def write(self, filename: str = "processed.tiff", **kwargs):
@@ -309,10 +312,10 @@ class ImageData(BaseModel):
         cv2.imwrite(str(filename), self._active, **kwargs)
 
     def subset(self, indices: list[int]):
-        self.subset_indices = indices
+        self._subset_indices = indices
 
     def superset(self):
-        self.subset_indices = None
+        self._subset_indices = None
 
 
 class SerializableModel(BaseModel):
