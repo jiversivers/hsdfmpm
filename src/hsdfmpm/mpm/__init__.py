@@ -1,2 +1,8 @@
-from .af import AutofluorescenceImage, OpticalRedoxRatio
-from .flim import LifetimeImage, InstrumentResponseFunction
+from .af import (
+    AutofluorescenceImage as AutofluorescenceImage,
+    OpticalRedoxRatio as OpticalRedoxRatio,
+)
+from .flim import (
+    LifetimeImage as LifetimeImage,
+    InstrumentResponseFunction as InstrumentResponseFunction,
+)

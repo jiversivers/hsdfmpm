@@ -1,1 +1,4 @@
-from .flim import LifetimeImage, InstrumentResponseFunction
+from .flim import (
+    LifetimeImage as LifetimeImage,
+    InstrumentResponseFunction as InstrumentResponseFunction,
+)

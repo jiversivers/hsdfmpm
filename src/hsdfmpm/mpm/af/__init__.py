@@ -1,1 +1,4 @@
-from .af import AutofluorescenceImage, OpticalRedoxRatio
+from .af import (
+    AutofluorescenceImage as AutofluorescenceImage,
+    OpticalRedoxRatio as OpticalRedoxRatio,
+)

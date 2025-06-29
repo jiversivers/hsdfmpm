@@ -1,1 +1,1 @@
-from .mie import generate_phantom_profiles
+from .mie import generate_phantom_profiles as generate_phantom_profiles
