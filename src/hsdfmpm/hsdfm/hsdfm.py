@@ -1,17 +1,40 @@
-from typing import Optional, Callable
+from typing import Optional, Callable, Union
 from functools import partial
+
+import cv2
+import numpy as np
+from pathlib import Path
 
 from photon_canon.lut import LUT
 from photon_canon.contrib.bio import hemoglobin_mus
+from photon_canon.utils import OpticalPropertyError
 from pydantic import model_validator, BaseModel, SkipValidation
 
-from .utils import *
+from .utils import normalize_to_standard, normalize_integration_time, read_metadata_json
 from ..utils import ImageData, read_hyperstack, add_arithmetic_methods
-from .fit import fit_volume
+from hsdfmpm.hsdfm.fit import fit_volume
 
 
-def default_model(a: float, b: float, t: float, s: float, wavelengths: np.ndarray[float] = None, lut: LUT = None) -> np.ndarray[float]:
+smoothing_fn = partial(cv2.GaussianBlur, ksize=(3, 3), sigmaX=2)
+DEFAULT_LUT = LUT(
+    dimensions=["mu_s", "mu_a"],
+    scale=50000,
+    extrapolate=True,
+    smoothing_fn=smoothing_fn,
+)
+
+
+def default_model(
+    a: float,
+    b: float,
+    t: float,
+    s: float,
+    g: float = 0.9,
+    wavelengths: np.ndarray[float] = None,
+    lut: LUT = None,
+) -> np.ndarray[float]:
     mu_s, mu_a, _ = hemoglobin_mus(a, b, t, s, wavelengths, force_feasible=False)
+    mu_s /= 1 - g
     return lut(mu_s, mu_a)
 
 
@@ -69,7 +92,7 @@ class HyperspectralImage(ImageData):
 
     def normalize_to_standard(self):
         if self.standard is None or self.background is None:
-            raise ValueError(
+            raise OpticalPropertyError(
                 f'"{self.image_path}" is missing "standard" and/or "background" attributes.\n'
                 f"Set them and try again."
             )
@@ -77,8 +100,7 @@ class HyperspectralImage(ImageData):
 
     def normalize(self):
         self.normalize_integration_time()
-        if self.standard is not None and self.background is not None:
-            self.normalize_to_standard()
+        self.normalize_to_standard()
 
     def get(self, wavelength: float) -> np.ndarray[float]:
         """Method to streamline selection of specific wavelengths from the image stack."""
@@ -95,22 +117,19 @@ class HyperspectralImage(ImageData):
         self,
         model: Callable[[float, float, ...], np.ndarray[float]] = None,
         x0: np.ndarray[float] = None,
-        **kwargs) -> tuple[np.ndarray[float], np.ndarray[float]]:
-
+        **kwargs,
+    ) -> tuple[np.ndarray[float], np.ndarray[float]]:
         # Defaults
         if model is None:
-            lut = LUT(dimensions=['mu_s', 'mu_a'], scale=50000, extrapolate=True)
-            model = partial(default_model, wavelengths=self.metadata['Wavelength'], lut=lut)
+            lut = DEFAULT_LUT
+            model = partial(
+                default_model, wavelengths=self.metadata["Wavelength"], lut=lut
+            )
         if x0 is None:
             x0 = np.zeros(4)
 
         # Fit in parallel
-        param_image, score = fit_volume(
-            volume=self.image,
-            model=model,
-            x0=x0,
-            **kwargs
-        )
+        param_image, score = fit_volume(volume=self.image, model=model, x0=x0, **kwargs)
 
         return param_image, score
 
