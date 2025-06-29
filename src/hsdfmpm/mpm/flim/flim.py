@@ -151,7 +151,10 @@ class LifetimeImage(ImageData):
             self.phasor_coordinates(**kwargs)
 
         # Fit a line to the cloud
-        b, m = fit_phasor(self.g, self.s)
+        fit_results = fit_phasor(self.g, self.s)
+        b, m = fit_results["fit_y_intercept"], fit_results["fit_slope"]
+        for k, v in fit_results.items():
+            setattr(self, k, v)
 
         # find circle interseciton points
         x, y = find_intersection_with_circle(b, m)
