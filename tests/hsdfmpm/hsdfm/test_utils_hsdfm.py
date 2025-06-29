@@ -7,7 +7,17 @@ from io import StringIO
 import contextlib
 from unittest.mock import patch
 
-from hsdfmpm.hsdfm import hsdfm
+from hsdfmpm.hsdfm.utils import (
+    read_metadata_json,
+    intra_vs_inter_cluster_variance,
+    normalize_integration_time,
+    normalize_to_standard,
+    get_local_stdev,
+    slice_clusters,
+    try_n_clusters,
+    k_cluster,
+    find_elbow_clusters
+)
 
 
 class TestUtils(unittest.TestCase):
@@ -33,7 +43,7 @@ class TestUtils(unittest.TestCase):
             json.dump(data, tmp)
             tmp_path = tmp.name
 
-        result = hsdfm.read_metadata_json(tmp_path)
+        result = read_metadata_json(tmp_path)
         os.remove(tmp_path)  # Clean up
 
         self.assertEqual(result["AbsTime"], [1, 2])
@@ -49,7 +59,7 @@ class TestUtils(unittest.TestCase):
             tmp_path = tmp.name
 
         with contextlib.redirect_stdout(StringIO()) as buf:
-            result = hsdfm.read_metadata_json(tmp_path)
+            result = read_metadata_json(tmp_path)
             output = buf.getvalue()
         os.remove(tmp_path)
 
@@ -70,7 +80,7 @@ class TestUtils(unittest.TestCase):
         # Test that a non-existent file prints an error and returns empty lists.
         non_existent_path = "non_existent_file.json"
         with contextlib.redirect_stdout(StringIO()) as buf:
-            result = hsdfm.read_metadata_json(non_existent_path)
+            result = read_metadata_json(non_existent_path)
             output = buf.getvalue()
 
         self.assertIn("File not found", output)
@@ -90,7 +100,7 @@ class TestUtils(unittest.TestCase):
         hyperstack = np.ones((2, 3, 3), dtype=float)
         integration_time = [2, 4]
         expected = np.array([np.ones((3, 3)) / 2, np.ones((3, 3)) / 4])
-        result = hsdfm.normalize_integration_time(hyperstack.copy(), integration_time)
+        result = normalize_integration_time(hyperstack.copy(), integration_time)
         np.testing.assert_allclose(result, expected)
 
     def test_normalize_to_standard(self):
@@ -99,7 +109,7 @@ class TestUtils(unittest.TestCase):
         standard = 15
         bg = 3
         expected = (hyperstack - bg) / (standard - bg)
-        result = hsdfm.normalize_to_standard(hyperstack, standard, bg)
+        result = normalize_to_standard(hyperstack, standard, bg)
         np.testing.assert_allclose(result, expected)
 
     def test_get_local_stdev(self):
@@ -111,11 +121,11 @@ class TestUtils(unittest.TestCase):
         # For the top-left block (2x2 sub-array), compute the expected std.
         block = np.array([[1, 2], [5, 6]])
         expected_std = np.nanstd(block)
-        result = hsdfm.get_local_stdev(image, (2, 2))
+        result = get_local_stdev(image, (2, 2))
         self.assertEqual(result.shape, (1, 2, 2))
         np.testing.assert_allclose(result[0, 0, 0], expected_std)
 
-    @patch("hsdfmpm.hsdfm.hsdfm.vectorize_img")
+    @patch("hsdfmpm.hsdfm.utils.vectorize_img")
     def test_k_cluster(self, mock_vectorize_img):
         # Patch vectorize_img to return a dummy 2D array.
         dummy_src = np.zeros((1, 2, 2))
@@ -124,7 +134,7 @@ class TestUtils(unittest.TestCase):
         mock_vectorize_img.return_value = X_dummy
 
         # Call k_cluster with k=2.
-        labels = hsdfm.k_cluster(dummy_src, k=2, include_location=False)
+        labels = k_cluster(dummy_src, k=2, include_location=False)
         # The returned labels should be reshaped to (2,2)
         self.assertEqual(labels.shape, (2, 2))
 
@@ -135,10 +145,10 @@ class TestUtils(unittest.TestCase):
         # For cluster 0: mean = 1.5, variance sum = 0.5;
         # For cluster 1: mean = 3.5, variance sum = 0.5; intra = 1.0,
         # Global mean = 2.5; inter = 2*1 + 2*1 = 4; ratio = 4/5 = 0.8.
-        result = hsdfm.intra_vs_inter_cluster_variance(src, labels)
+        result = intra_vs_inter_cluster_variance(src, labels)
         self.assertAlmostEqual(result, 0.8)
 
-    @patch("hsdfmpm.hsdfm.hsdfm.k_cluster")
+    @patch("hsdfmpm.hsdfm.utils.k_cluster")
     def test_try_n_clusters(self, mock_k_cluster):
         # Create a dummy src of shape (1,2,2).
         src = np.zeros((1, 2, 2))
@@ -147,7 +157,7 @@ class TestUtils(unittest.TestCase):
         mock_k_cluster.return_value = dummy_labels
 
         ks = [2, 3]
-        clusters, scores = hsdfm.try_n_clusters(src, ks)
+        clusters, scores = try_n_clusters(src, ks)
         # clusters should have shape (len(ks), 2, 2) and scores length equal to len(ks).
         self.assertEqual(clusters.shape, (len(ks), 2, 2))
         self.assertEqual(scores.shape, (len(ks),))
@@ -162,7 +172,7 @@ class TestUtils(unittest.TestCase):
         # Based on np.gradient, the maximum gradient is expected at index 0,
         # so elbow = np.argmax(np.gradient(scores)) + 1 should be 1.
         expected_cluster = clusters[1]
-        result_cluster, elbow_index = hsdfm.find_elbow_clusters(clusters, scores)
+        result_cluster, elbow_index = find_elbow_clusters(clusters, scores)
         np.testing.assert_array_equal(result_cluster, expected_cluster)
         self.assertEqual(elbow_index, 1)
 
@@ -174,7 +184,7 @@ class TestUtils(unittest.TestCase):
         # Cluster 0: (10+40)/2 = 25, Cluster 1: 20, Cluster 2: 30.
         # np.argsort yields [1, 0, 2]. Using the default slice (2, None) selects [2].
         expected_mask = clusters == 2
-        result_mask = hsdfm.slice_clusters(src, clusters)
+        result_mask = slice_clusters(src, clusters)
         np.testing.assert_array_equal(result_mask, expected_mask)
 
 
