@@ -10,10 +10,13 @@ from urllib.parse import urlparse
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 from matplotlib.colors import Normalize
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, Colormap, LinearSegmentedColormap
 from pydantic import BaseModel, Field, computed_field, AfterValidator
+
+from skimage.segmentation import flood
 
 DATA_PATH = Path.home() / ".hsdfmpm"
 DATA_PATH.mkdir(exist_ok=True, parents=True)
@@ -59,7 +62,7 @@ def iterable_array(x: Any) -> Iterable[Any]:
 
 
 # Helper function to handle reshaping input images
-def vectorize_img(img: np.ndarray, include_location: bool = False) -> np.ndarray:
+def vectorize_img(img: NDArray, include_location: bool = False) -> NDArray:
     if img.ndim <= 2:
         shape = img.shape
         X = img.reshape(-1, 1)
@@ -76,7 +79,7 @@ def vectorize_img(img: np.ndarray, include_location: bool = False) -> np.ndarray
 
 
 # Image reader
-def read_hyperstack(img_dir: str, ext: str = ".tif") -> np.ndarray[float]:
+def read_hyperstack(img_dir: str, ext: str = ".tif") -> NDArray[float]:
     hs = []
     for img_path in Path(img_dir).glob(f"*{ext}"):
         hs.append(cv2.imread(img_path, cv2.IMREAD_UNCHANGED))
@@ -89,15 +92,30 @@ def read_hyperstack(img_dir: str, ext: str = ".tif") -> np.ndarray[float]:
 
 
 def apply_kernel_bank(
-    src: np.ndarray[float], bank: np.ndarray[float], **kwargs: Any
-) -> np.ndarray[float]:
-    return np.nanmax(
-        [cv2.filter2D(src, -1, k, **kwargs) for k in bank], axis=0
-    )
+    src: NDArray[float], bank: NDArray[float], **kwargs: Any
+) -> NDArray[float]:
+    return np.nanmax([cv2.filter2D(src, -1, k, **kwargs) for k in bank], axis=0)
+
+
+def flood_blurred(
+    src: NDArray[float],
+    seed_px: tuple[int, int],
+    tolerance: float = None,
+    *args: Any,
+    **kwargs: Any,
+) -> NDArray[bool]:
+    """Create a boolean mask using flood segmentation from a seed pixel after Gaussian blurring according to input filter specs if given."""
+
+    # Blur the image if filter specs given
+    if args or kwargs:
+        src = cv2.GaussianBlur(src, *args, **kwargs)
+
+    mask = flood(src, seed_px, tolerance)
+    return mask
 
 
 def truncate_colormap(
-    cmap: Optional[Union[Colormap, np.ndarray[float], str]] = None,
+    cmap: Optional[Union[Colormap, NDArray[float], str]] = None,
     cmin: float = 0,
     cmax: float = 1,
     n: int = 100,
@@ -107,9 +125,9 @@ def truncate_colormap(
     return LinearSegmentedColormap.from_list("truncated_cmap", new_colors, N=n)
 
 
-def get_cmap(cmap: Optional[Union[Colormap, np.ndarray[float], str]] = None):
+def get_cmap(cmap: Optional[Union[Colormap, NDArray[float], str]] = None):
     if not isinstance(cmap, Colormap):
-        if isinstance(cmap, np.ndarray):
+        if isinstance(cmap, NDArray):
             cmap = ListedColormap(cmap)
         elif isinstance(cmap, str):
             cmap = cm.get_cmap(cmap)
@@ -123,16 +141,15 @@ def get_cmap(cmap: Optional[Union[Colormap, np.ndarray[float], str]] = None):
 
 
 def colorize(
-    var_map: np.ndarray[float],
-    intensity: Optional[np.ndarray[float]] = None,
-    cmap: Optional[Union[Colormap, np.ndarray]] = None,
+    var_map: NDArray[float],
+    intensity: Optional[NDArray[float]] = None,
+    cmap: Optional[Union[Colormap, NDArray]] = None,
     cmin: float = 0.0,
     cmax: float = 1.0,
     n: int = 100,
     intmin: float = 0.1,
     intmax: float = 0.95,
-) -> tuple[np.ndarray[float], Colormap]:
-
+) -> tuple[NDArray[float], Colormap]:
     if intensity is None:
         intensity = np.ones_like(var_map)
 
@@ -222,8 +239,8 @@ class ImageData(BaseModel):
     channels: Annotated[
         Optional[Union[int, list[int], tuple[int]]], AfterValidator(channel_check)
     ] = None
-    _hyperstack: Optional[np.ndarray] = None
-    _active: Optional[np.ndarray] = None
+    _hyperstack: Optional[NDArray] = None
+    _active: Optional[NDArray] = None
     _subset_indices: Optional[list] = None
 
     class Config:
@@ -232,7 +249,7 @@ class ImageData(BaseModel):
 
     @computed_field
     @property
-    def hyperstack(self) -> np.ndarray:
+    def hyperstack(self) -> NDArray:
         if self._hyperstack is None:
             self._hyperstack = read_hyperstack(self.image_path, self.image_ext)
         # Select out channels
@@ -247,14 +264,14 @@ class ImageData(BaseModel):
 
     @computed_field
     @property
-    def image(self) -> np.ndarray:
+    def image(self) -> NDArray:
         if self._subset_indices is not None:
             return self._active[self._subset_indices]
         return self._active
 
     @computed_field
     @property
-    def raw(self) -> np.ndarray:
+    def raw(self) -> NDArray:
         return self.hyperstack
 
     def reset(self):
@@ -262,7 +279,7 @@ class ImageData(BaseModel):
         self._subset_indices = None
         self._active = self.hyperstack
 
-    def __getitem__(self, item: int) -> np.ndarray:
+    def __getitem__(self, item: int) -> NDArray:
         return self._active[item]
 
     def __len__(self) -> int:
@@ -298,7 +315,7 @@ class ImageData(BaseModel):
     def resize_to(self, h: int):
         self.bin(bin_factor=self.shape[1] // h)
 
-    def apply_kernel_bank(self, kernel_bank: np.ndarray, **kwargs) -> np.ndarray:
+    def apply_kernel_bank(self, kernel_bank: NDArray, **kwargs) -> NDArray:
         permuted = np.moveaxis(self.image.copy(), 0, -1)  # Permute to H, W, C
         conv = apply_kernel_bank(permuted, kernel_bank, **kwargs)
         return np.moveaxis(conv, -1, 0)
