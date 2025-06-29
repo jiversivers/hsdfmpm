@@ -80,7 +80,7 @@ def get_transfer_function(
         # Calculate transfer function
         g = params[0] * gain ** params[1]
 
-        img = ((img - offset) / (pwr ** 2)) / g
+        img = ((img - offset) / (pwr**2)) / g
 
         return img
 

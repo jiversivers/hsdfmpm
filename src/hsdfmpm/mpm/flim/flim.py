@@ -1,5 +1,4 @@
 import warnings
-from itertools import product
 from pathlib import Path
 from typing import Optional, Union, Callable
 
@@ -7,22 +6,19 @@ import numpy as np
 from matplotlib import pyplot as plt
 import seaborn as sns
 from pydantic import model_validator, computed_field
-from scipy import signal
 from scipy.ndimage import generic_filter
 
 from hsdfmpm.mpm.flim.utils import (
     open_sdt_file_with_json_metadata,
-    cartesian_from_polar,
     polar_from_cartesian,
     lifetime_from_cartesian,
-    polar_from_lifetime,
     get_phasor_coordinates,
     find_intersection_with_circle,
     project_to_line,
     fit_phasor,
     get_endpoints_from_projection,
     complex_phasor,
-    cartesian_from_lifetime
+    cartesian_from_lifetime,
 )
 from hsdfmpm.utils import SerializableModel, DATA_PATH, ImageData, ensure_path
 
@@ -79,16 +75,19 @@ class LifetimeImage(ImageData):
         T = self.shape[-1]
         conv_L = T + self.calibration.shape[-1] - 1
         decay = np.fft.fft(self.decay, n=conv_L, axis=-1)
-        irf = np.fft.fft(self.calibration / self.calibration.decay.sum(axis=-1, keepdims=-1), n=conv_L, axis=-1)
+        irf = np.fft.fft(
+            self.calibration / self.calibration.decay.sum(axis=-1, keepdims=-1),
+            n=conv_L,
+            axis=-1,
+        )
         decay /= irf
         decay = np.fft.ifft(decay, axis=-1).real
         self._active = decay[..., :T]
 
     def fit(
-        self,
-        model: Callable[[float, float, ...], np.ndarray[float]],
-        **kwargs) -> tuple[np.ndarray[float], np.ndarray[float]]:
-        if not hasattr(self, 'deconvolved'):
+        self, model: Callable[[float, float, ...], np.ndarray[float]], **kwargs
+    ) -> tuple[np.ndarray[float], np.ndarray[float]]:
+        if not hasattr(self, "deconvolved"):
             self.deconvolve()
         _active = self._active.copy()
         out_image = np.zeros(self.shape[:-1])
@@ -105,14 +104,14 @@ class LifetimeImage(ImageData):
         threshold: float = 0,
         median_filter_count: int = 0,
         k_size: Union[tuple[int, int], int] = (3, 3),
-        as_complex: bool = False) -> tuple[np.ndarray, np.ndarray]:
-
+        as_complex: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray]:
         P, self.photons = get_phasor_coordinates(
             self.decay,
             bin_width=self.bin_width,
             frequency=self.frequency,
             harmonic=self.harmonic,
-            as_complex=True
+            as_complex=True,
         )
 
         # Apply correction
@@ -135,8 +134,8 @@ class LifetimeImage(ImageData):
 
         # Median filter G and S for median_filter_count passes with input size kernel
         for _ in range(median_filter_count):
-            self.g = generic_filter(self.g, np.nanmedian, size=k_size, mode='nearest')
-            self.s = generic_filter(self.s, np.nanmedian, size=k_size, mode='nearest')
+            self.g = generic_filter(self.g, np.nanmedian, size=k_size, mode="nearest")
+            self.s = generic_filter(self.s, np.nanmedian, size=k_size, mode="nearest")
 
         with np.errstate(divide="ignore", invalid="ignore"):
             # Tau_phi: Phi-based lifetime, Tau_m: Modulation based lifetime
@@ -148,7 +147,7 @@ class LifetimeImage(ImageData):
         return self.g, self.s
 
     def get_phasor_line(self, **kwargs):
-        if not (hasattr(self, 'g') and hasattr(self, 's')) or kwargs:
+        if not (hasattr(self, "g") and hasattr(self, "s")) or kwargs:
             self.phasor_coordinates(**kwargs)
 
         # Fit a line to the cloud
@@ -157,17 +156,15 @@ class LifetimeImage(ImageData):
         # find circle interseciton points
         x, y = find_intersection_with_circle(b, m)
 
-        return {'intersection': (x, y),
-                'point-slope': (b, m)}
-
+        return {"intersection": (x, y), "point-slope": (b, m)}
 
     def fit_for_lifetime_approximations(self, **kwargs):
-        if not (hasattr(self, 'g') and hasattr(self, 's')) or kwargs:
+        if not (hasattr(self, "g") and hasattr(self, "s")) or kwargs:
             self.phasor_coordinates(**kwargs)
 
-        x, y = self.get_phasor_line(**kwargs)['intersection']
+        x, y = self.get_phasor_line(**kwargs)["intersection"]
 
-         # Project to the line segment
+        # Project to the line segment
         gp, sp = project_to_line(self.g, self.s, x, y)
 
         # Find lifetime components
@@ -222,7 +219,9 @@ class InstrumentResponseFunction(LifetimeImage, SerializableModel):
         P_ref = self.phasor_coordinates(correction=False, as_complex=True)
 
         # Get references
-        P_true = cartesian_from_lifetime(self.reference_lifetime, self.omega, as_complex=True)
+        P_true = cartesian_from_lifetime(
+            self.reference_lifetime, self.omega, as_complex=True
+        )
 
         # Calculate complex correction factor
         self.correction = P_true / P_ref
@@ -292,14 +291,13 @@ def get_irf(
 
     :return: A InstrumentResponseFunction object for the IRF file.
     :rtype: InstrumentResponseFunction
-
     """
     if isinstance(irf, InstrumentResponseFunction):
         return irf
 
     # Search data path if no path input
     if irf is None:
-        file = list(IRF_PATH.glob(f"irf.pkl"))[-1]
+        file = list(IRF_PATH.glob("irf.pkl"))[-1]
         warnings.warn(f"Loading default IRF file, '{file}'.", Warning, stacklevel=2)
     # Look for pickles if dir given
     else:

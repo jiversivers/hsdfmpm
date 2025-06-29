@@ -221,7 +221,6 @@ def gm_model(
 def prepare_clustering_variables(
     src: np.ndarray[float], include_location: bool = False
 ) -> tuple[np.ndarray[float], np.ndarray[int]]:
-    shape = src.shape[-2:]
     X = vectorize_img(src, include_location=include_location)
     X = StandardScaler().fit_transform(X)
     return X
@@ -258,7 +257,6 @@ def gabor_filter_bank(
 def naive_leastsq_reflectance(
     hyperstack: np.ndarray[float], eps: np.ndarray[float]
 ) -> tuple[np.ndarray[float], np.ndarray[float]]:
-
     # Create design matrix
     A = np.column_stack([eps.T, np.ones_like(eps.T)])
 

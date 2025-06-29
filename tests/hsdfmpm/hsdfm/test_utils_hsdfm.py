@@ -9,29 +9,42 @@ from unittest.mock import patch
 
 from hsdfmpm.hsdfm import hsdfm
 
+
 class TestUtils(unittest.TestCase):
     def test_read_metadata_json_valid(self):
         # Create a temporary file with valid JSON data.
         data = [
-            {"AbsTime": 1, "ExpTime": 2, "Filter": "A", "AvgInt": 3.5, "Wavelength": 500},
-            {"AbsTime": 2, "ExpTime": 3, "Filter": "B", "AvgInt": 4.5, "Wavelength": 600}
+            {
+                "AbsTime": 1,
+                "ExpTime": 2,
+                "Filter": "A",
+                "AvgInt": 3.5,
+                "Wavelength": 500,
+            },
+            {
+                "AbsTime": 2,
+                "ExpTime": 3,
+                "Filter": "B",
+                "AvgInt": 4.5,
+                "Wavelength": 600,
+            },
         ]
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w+", delete=False) as tmp:
             json.dump(data, tmp)
             tmp_path = tmp.name
 
         result = hsdfm.read_metadata_json(tmp_path)
         os.remove(tmp_path)  # Clean up
 
-        self.assertEqual(result['AbsTime'], [1, 2])
-        self.assertEqual(result['ExpTime'], [2, 3])
-        self.assertEqual(result['Filter'], ["A", "B"])
-        self.assertEqual(result['AvgInt'], [3.5, 4.5])
-        self.assertEqual(result['Wavelength'], [500, 600])
+        self.assertEqual(result["AbsTime"], [1, 2])
+        self.assertEqual(result["ExpTime"], [2, 3])
+        self.assertEqual(result["Filter"], ["A", "B"])
+        self.assertEqual(result["AvgInt"], [3.5, 4.5])
+        self.assertEqual(result["Wavelength"], [500, 600])
 
     def test_read_metadata_json_invalid_json(self):
         # Create a temporary file with invalid JSON content.
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w+", delete=False) as tmp:
             tmp.write("Not a JSON")
             tmp_path = tmp.name
 
@@ -42,13 +55,16 @@ class TestUtils(unittest.TestCase):
 
         self.assertIn("Error decoding JSON", output)
         # The function returns the dictionary with empty lists.
-        self.assertEqual(result, {
-            'AbsTime': [],
-            'ExpTime': [],
-            'Filter': [],
-            'AvgInt': [],
-            'Wavelength': [],
-        })
+        self.assertEqual(
+            result,
+            {
+                "AbsTime": [],
+                "ExpTime": [],
+                "Filter": [],
+                "AvgInt": [],
+                "Wavelength": [],
+            },
+        )
 
     def test_read_metadata_json_file_not_found(self):
         # Test that a non-existent file prints an error and returns empty lists.
@@ -58,13 +74,16 @@ class TestUtils(unittest.TestCase):
             output = buf.getvalue()
 
         self.assertIn("File not found", output)
-        self.assertEqual(result, {
-            'AbsTime': [],
-            'ExpTime': [],
-            'Filter': [],
-            'AvgInt': [],
-            'Wavelength': [],
-        })
+        self.assertEqual(
+            result,
+            {
+                "AbsTime": [],
+                "ExpTime": [],
+                "Filter": [],
+                "AvgInt": [],
+                "Wavelength": [],
+            },
+        )
 
     def test_normalize_integration_time(self):
         # Test that division is applied correctly.
@@ -85,12 +104,10 @@ class TestUtils(unittest.TestCase):
 
     def test_get_local_stdev(self):
         # Create a simple 1-channel image (shape: (1, 4, 4))
-        image = np.array([[
-            [1,  2,  3,  4],
-            [5,  6,  7,  8],
-            [9, 10, 11, 12],
-            [13,14,15,16]
-        ]], dtype=float)
+        image = np.array(
+            [[[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16]]],
+            dtype=float,
+        )
         # For the top-left block (2x2 sub-array), compute the expected std.
         block = np.array([[1, 2], [5, 6]])
         expected_std = np.nanstd(block)
@@ -98,7 +115,7 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(result.shape, (1, 2, 2))
         np.testing.assert_allclose(result[0, 0, 0], expected_std)
 
-    @patch('hsdfmpm.hsdfm.hsdfm.vectorize_img')
+    @patch("hsdfmpm.hsdfm.hsdfm.vectorize_img")
     def test_k_cluster(self, mock_vectorize_img):
         # Patch vectorize_img to return a dummy 2D array.
         dummy_src = np.zeros((1, 2, 2))
@@ -121,7 +138,7 @@ class TestUtils(unittest.TestCase):
         result = hsdfm.intra_vs_inter_cluster_variance(src, labels)
         self.assertAlmostEqual(result, 0.8)
 
-    @patch('hsdfmpm.hsdfm.hsdfm.k_cluster')
+    @patch("hsdfmpm.hsdfm.hsdfm.k_cluster")
     def test_try_n_clusters(self, mock_k_cluster):
         # Create a dummy src of shape (1,2,2).
         src = np.zeros((1, 2, 2))
@@ -140,11 +157,7 @@ class TestUtils(unittest.TestCase):
 
     def test_find_elbow_clusters(self):
         # Prepare dummy clusters and scores.
-        clusters = np.array([
-            [[0, 0], [0, 0]],
-            [[0, 1], [1, 0]],
-            [[1, 1], [1, 1]]
-        ])
+        clusters = np.array([[[0, 0], [0, 0]], [[0, 1], [1, 0]], [[1, 1], [1, 1]]])
         scores = np.array([0.2, 0.5, 0.6])
         # Based on np.gradient, the maximum gradient is expected at index 0,
         # so elbow = np.argmax(np.gradient(scores)) + 1 should be 1.
@@ -160,10 +173,10 @@ class TestUtils(unittest.TestCase):
         # For unique clusters [0,1,2] with averages:
         # Cluster 0: (10+40)/2 = 25, Cluster 1: 20, Cluster 2: 30.
         # np.argsort yields [1, 0, 2]. Using the default slice (2, None) selects [2].
-        expected_mask = (clusters == 2)
+        expected_mask = clusters == 2
         result_mask = hsdfm.slice_clusters(src, clusters)
         np.testing.assert_array_equal(result_mask, expected_mask)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

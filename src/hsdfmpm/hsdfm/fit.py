@@ -1,6 +1,5 @@
 import numpy as np
 import multiprocessing as mp
-from tqdm.contrib.itertools import product
 from functools import partial
 
 from scipy.optimize import least_squares
@@ -13,18 +12,23 @@ class LossIsGoodEnough(Exception):
     pass
 
 
-def reduced_chi_squared(predicted: np.ndarray[float, ...], observed: np.ndarray[float], p: int) -> float:
+def reduced_chi_squared(
+    predicted: np.ndarray[float, ...], observed: np.ndarray[float], p: int
+) -> float:
     df = len(observed) - p
     return (1 / df) * np.sum(((observed - predicted) ** 2) / np.var(observed))
 
 
 def residual(
-        params: [float, ...],
-        voxel: np.ndarray[float],
-        *,
-        model: Callable[[float, ...], float] = None,
-        score_function: Callable[[np.ndarray[float, ...], np.ndarray[float, ...], int], float] = None,
-        loss_thresh: float = None) -> np.ndarray[float]:
+    params: [float, ...],
+    voxel: np.ndarray[float],
+    *,
+    model: Callable[[float, ...], float] = None,
+    score_function: Callable[
+        [np.ndarray[float, ...], np.ndarray[float, ...], int], float
+    ] = None,
+    loss_thresh: float = None,
+) -> np.ndarray[float]:
     """Thin wrapper around the model to calculate residual and throw stop exception at loss threshold."""
     pred = model(*params)
     res = pred - voxel
@@ -42,11 +46,12 @@ def make_residual(**kwargs) -> Callable[[float, ...], float]:
 
 
 def jacobian(
-        params: np.ndarray[float, ...],
-        voxel: np.ndarray[float, ...],
-        *,
-        model: Callable[[float, ...], float],
-        eps: float = 1e-4) -> np.ndarray[float]:
+    params: np.ndarray[float, ...],
+    voxel: np.ndarray[float, ...],
+    *,
+    model: Callable[[float, ...], float],
+    eps: float = 1e-4,
+) -> np.ndarray[float]:
     """Calculate a simple Jacobian approximation by modelling eps increments on each parameter."""
     residual_function = make_residual(voxel=voxel, model=model, loss_thresh=-1)
     r0 = residual_function(params)
@@ -69,15 +74,22 @@ def fit_voxel(
     *,
     x0: list[float, ...],
     loss_thresh: float = None,
-    score_function: Callable[[np.ndarray[float, ...], np.ndarray[float, ...], int], float] = reduced_chi_squared,
-    eps = 1e-4,
-    **kwargs) -> tuple[np.ndarray[float, ...], np.ndarray[float, ...]]:
+    score_function: Callable[
+        [np.ndarray[float, ...], np.ndarray[float, ...], int], float
+    ] = reduced_chi_squared,
+    eps=1e-4,
+    **kwargs,
+) -> tuple[np.ndarray[float, ...], np.ndarray[float, ...]]:
     """Perform least squares fit on a single voxel. loss threshold is used to calculate a ftol that crosses that loss."""
 
-    residual_function = make_residual(voxel=voxel, model=model, loss_thresh=loss_thresh, score_function=score_function)
+    residual_function = make_residual(
+        voxel=voxel, model=model, loss_thresh=loss_thresh, score_function=score_function
+    )
     jacobian_function = make_jacobian(voxel=voxel, model=model, eps=eps)
     try:
-        fit_result = least_squares(residual_function, x0, jac=jacobian_function, **kwargs)
+        fit_result = least_squares(
+            residual_function, x0, jac=jacobian_function, **kwargs
+        )
     except LossIsGoodEnough as exc:
         params = exc.args[0]
         score = exc.args[1]
@@ -92,9 +104,13 @@ def fit_voxel(
 
 
 def volume_iter(
-    volume: np.ndarray[float],
+    volume: np.ndarray[float], pbar: bool = False
 ) -> Generator[tuple[int, int, np.ndarray[float]]]:
-    """Yields a single voxel (H x W) from an image colume shape Ch x H x W, ignoring nan pixels"""
+    """Yields a single voxel (H x W) from an image column shape Ch x H x W, ignoring nan pixels"""
+    if pbar:
+        from tqdm.contrib.itertools import product
+    else:
+        from itertools import product
     for y, x in product(range(volume.shape[1]), range(volume.shape[2])):
         if np.any(np.isnan(volume[:, y, x])):
             continue
@@ -102,8 +118,8 @@ def volume_iter(
 
 
 def make_voxel_mapper(
-        t: list[int, int, np.ndarray[float, ...]],
-        **kwargs) -> tuple[int, int, np.ndarray[float]]:
+    t: list[int, int, np.ndarray[float, ...]], **kwargs
+) -> tuple[int, int, np.ndarray[float]]:
     return t[0], t[1], fit_voxel(t[2], **kwargs)
 
 
@@ -112,11 +128,14 @@ def fit_volume(
     n_workers: Optional[int] = None,
     x0: np.ndarray[float, ...] = None,
     use_multiprocessing: bool = True,
-    **kwargs) -> tuple[np.ndarray[float, ...], np.ndarray[float,...]]:
-
+    pbar: bool = False,
+    **kwargs,
+) -> tuple[np.ndarray[float, ...], np.ndarray[float, ...]]:
     # Get n_workers and calculate chunksize (Enough for ~1 chunk per worker)
     n_workers = n_workers or mp.cpu_count() // 2
-    chunksize = max(1, int((np.count_nonzero(~np.any(np.isnan(volume), axis=0))) / n_workers))
+    chunksize = max(
+        1, int((np.count_nonzero(~np.any(np.isnan(volume), axis=0))) / n_workers)
+    )
 
     param_image = np.zeros((len(x0), *volume.shape[1:]), dtype=np.float32)
     score_image = np.zeros(volume.shape[1:], dtype=np.float32)
@@ -125,11 +144,11 @@ def fit_volume(
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             iterator = executor.map(
                 voxel_mapper,  # -> y, x, (params, score)
-                volume_iter(volume),
+                volume_iter(volume, pbar=pbar),
                 chunksize=int(chunksize),
             )
     else:
-        iterator = map(voxel_mapper, volume_iter(volume))
+        iterator = map(voxel_mapper, volume_iter(volume, pbar=pbar))
 
     for y, x, (params, score) in iterator:
         param_image[:, y, x] = params

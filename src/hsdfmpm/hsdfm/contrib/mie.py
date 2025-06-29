@@ -21,6 +21,8 @@ def mie_scattering_coefficients(m: complex, x: float) -> np.ndarray:
               - Row 2: cₙ
               - Row 3: dₙ
     :rtype: numpy.ndarray
+
+
     """
     # determine highest order
     nmax = int(np.round(2 + x + 4 * x ** (1 / 3)))
@@ -204,8 +206,7 @@ def compute_volume_distribution_by_scattering(
     ref_wavelength_idx: int = 22,
 ) -> np.ndarray:
     """
-    Compute the bead‐and‐water volumes (in μL) required to achieve specified
-    reduced scattering coefficients.
+    Compute the bead‐and‐water volumes (in μL) required to achieve specified reduced scattering coefficients.
 
     :param redscat_coef_mm_inv: Array of desired reduced scattering coefficients (mm⁻¹).
     :type redscat_coef_mm_inv: numpy.ndarray
@@ -261,8 +262,8 @@ def compute_volume_distribution_by_bead_number(
     ref_wavelength_idx: int = 22,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Compute the updated reduced scattering coefficient and the bead‐and‐water
-    volumes (in μL) based on a specified bead‐solution volume.
+    Compute the updated reduced scattering coefficient and the bead‐and‐water volumes (in μL) based on a specified
+    bead‐solution volume.
 
     :param bead_volume_ul: Array of bead volumes to add (μL).
     :type bead_volume_ul: numpy.ndarray
@@ -321,8 +322,8 @@ def generate_phantom_profiles(
     bead_volumes_ul: np.ndarray = None,
     ref_wavelength: float = 630,
 ) -> dict:
-    """
-    Compute bead volumes and reduced‑scattering profiles for phantom preparation.
+    """Compute bead volumes and reduced‑scattering profiles for phantom preparation. Depending on the :param:`mode`,
+    this function can work to compute scattering from concentration of beads, beads from a desired scatter, or both.
 
     :param wavelengths: Vector of wavelengths (nm).
     :type wavelengths: numpy.ndarray[float]
@@ -339,24 +340,24 @@ def generate_phantom_profiles(
     :param bead_volumes_ul: Array of bead volumes to add (μL).
                              Required if mode includes 'beads'.
     :param ref_wavelength: Reference wavelength (nm) at which to match μₛ′.
-    :returns: A dict containing (keys depend on `mode`):
+    :returns: A dict containing (keys depend on :param:`mode`):
 
       - **wavelengths_nm** (np.ndarray): wavelengths in nm.
 
       - **bead_volumes_ul_scatter** (np.ndarray):
-        μL of beads needed to hit each `redscat_coef` (mode 'scattering' or 'both').
+        μL of beads needed to hit each :param:`redscat_coef` (:param:`mode` 'scattering' or 'both').
 
       - **volume_distribution_scatter_ul** (np.ndarray):
-        shape (P×3), columns = [beads, water, total] μL (mode 'scattering' or 'both').
+        shape (P×3), columns = [beads, water, total] μL (:param:`mode` 'scattering' or 'both').
 
       - **volume_distribution_bead_ul** (np.ndarray):
-        shape (P×3), columns = [beads, water, total] μL (mode 'beads' or 'both').
+        shape (P×3), columns = [beads, water, total] μL (:param:`mode` 'beads' or 'both').
 
       - **musp_profiles_cm_inv_scatter** (list[np.ndarray]):
-        full μₛ′(λ) curves in cm⁻¹ for each phantom (mode 'scattering' or 'both').
+        full μₛ′(λ) curves in cm⁻¹ for each phantom (:param:`mode` 'scattering' or 'both').
 
       - **musp_profiles_cm_inv_beads** (list[np.ndarray]):
-        full μₛ′(λ) curves in cm⁻¹ for each phantom (mode 'beads' or 'both').
+        full μₛ′(λ) curves in cm⁻¹ for each phantom (:param:`mode` 'beads' or 'both').
     """
     out = {}
 
